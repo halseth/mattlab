@@ -1,0 +1,9 @@
+
+.DS_Store
+.minerlogs/
+cmd/scenario/scenario
+cmd/spend/spend
+commitment/cmd/cmd
+leafgen/cmd/leafgen/leafgen
+nodegen/cmd/nodegen/leafgen
+tracer/cmd/tracer/tracer
