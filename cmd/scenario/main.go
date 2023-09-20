@@ -49,6 +49,15 @@ func main() {
 }
 
 func run() error {
+	// Start by reading Alice's trace from STDIN.
+	// In a real scenario Alice would look at the question Bob posts and
+	// then create her trace, but to allow us to introduce mistakes in the
+	// trace, we take it as input.
+	aliceTrace, err := print.ReadTrace()
+	if err != nil {
+		return err
+	}
+
 	// check connection to running node.
 	t := &testing.T{}
 	miner := btcd.NewMiner(context.Background(), t)
@@ -98,10 +107,12 @@ func run() error {
 	_ = miner.GenerateBlocks(1)
 
 	// Alice generates trace from looking at X in the witness.
-	tr, err := generateTrace(tx)
-	if err != nil {
-		return err
-	}
+	//	tr, err := generateTrace(tx)
+	//	if err != nil {
+	//		return err
+	//	}
+
+	tr := aliceTrace
 
 	fmt.Println("got trace")
 	print.PrintTrace(tr)
