@@ -3,6 +3,8 @@ package scripts
 import (
 	"fmt"
 
+	"github.com/btcsuite/btcd/btcec/v2"
+	"github.com/btcsuite/btcd/btcec/v2/schnorr"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/halseth/tapsim/file"
 	"github.com/halseth/tapsim/script"
@@ -29,40 +31,65 @@ OP_ROT # get data on top again
 OP_0 # index
 OP_0 # check output
 OP_CHECKCONTRACTVERIFY # check output commitment matches subtrees
-OP_1
+
+# Check Bob's signature.
+%x
+OP_CHECKSIG
 # ====================== QUESTION SCRIPT END =======================
 `
 
-func GenerateQuestionStr(taptree []byte) (string, error) {
-	scr := fmt.Sprintf(questionScript, taptree)
+func GenerateQuestionStr(bobKey *btcec.PublicKey, taptree []byte) (string, error) {
+	scr := fmt.Sprintf(questionScript, taptree,
+		schnorr.SerializePubKey(bobKey))
 	return scr, nil
 }
 
-func GenerateQuestion(totalLevels int, leaves []string) ([]byte, error) {
-	// Always send to answer
-	answer, err := GenerateAnswer(totalLevels, leaves)
+func GenerateQuestion(aliceKey, bobKey *btcec.PublicKey, totalLevels int,
+	leaves []string) ([]byte, *txscript.IndexedTapScriptTree, error) {
+
+	// Always send to answer.
+	answer, _, err := GenerateAnswer(
+		aliceKey, bobKey, totalLevels, leaves,
+	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var tapLeaves []txscript.TapLeaf
 	t := txscript.NewBaseTapLeaf(answer)
 	tapLeaves = append(tapLeaves, t)
+
+	// Add timeout to Bob.
+	timeout, err := GenerateTimeout(bobKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tt := txscript.NewBaseTapLeaf(timeout)
+	tapLeaves = append(tapLeaves, tt)
+
 	tapScriptTree := txscript.AssembleTaprootScriptTree(tapLeaves...)
 	taptree := tapScriptTree.RootNode.TapHash()
 
-	scr, err := GenerateQuestionStr(taptree[:])
+	scr, err := GenerateQuestionStr(bobKey, taptree[:])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	//	fmt.Println(scr)
 	scriptBytes := []byte(scr)
 
 	s, err := file.ParseScript(scriptBytes)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return script.Parse(s)
+	parsed, err := script.Parse(s)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return parsed, tapScriptTree, nil
 }
 
 // alice spends with the answer transaction, revealing her answer and trace
@@ -113,40 +140,64 @@ OP_ROT # get data on top again
 OP_0 # index
 OP_0 # check output
 OP_CHECKCONTRACTVERIFY # check output commitment matches subtrees
-OP_1
+
+# Check Alice's signature.
+%x
+OP_CHECKSIG
 # ====================== ANSWER SCRIPT END =======================
 `
 
-func GenerateAnswerStr(taptree []byte) (string, error) {
-	scr := fmt.Sprintf(answerScript, taptree)
+func GenerateAnswerStr(aliceKey *btcec.PublicKey, taptree []byte) (string, error) {
+	scr := fmt.Sprintf(answerScript, taptree,
+		schnorr.SerializePubKey(aliceKey))
 	return scr, nil
 }
 
-func GenerateAnswer(totalLevels int, leaves []string) ([]byte, error) {
+func GenerateAnswer(aliceKey, bobKey *btcec.PublicKey, totalLevels int,
+	leaves []string) ([]byte, *txscript.IndexedTapScriptTree, error) {
+
 	// Send to challenge
-	challenge, err := GenerateChallenge(totalLevels, leaves)
+	challenge, _, err := GenerateChallenge(
+		aliceKey, bobKey, totalLevels, leaves,
+	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var tapLeaves []txscript.TapLeaf
 	t := txscript.NewBaseTapLeaf(challenge)
 	tapLeaves = append(tapLeaves, t)
+
+	// Add timeout to Alice.
+	timeout, err := GenerateTimeout(aliceKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tt := txscript.NewBaseTapLeaf(timeout)
+	tapLeaves = append(tapLeaves, tt)
+
 	tapScriptTree := txscript.AssembleTaprootScriptTree(tapLeaves...)
 	taptree := tapScriptTree.RootNode.TapHash()
 
-	scr, err := GenerateAnswerStr(taptree[:])
+	scr, err := GenerateAnswerStr(aliceKey, taptree[:])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	fmt.Println(scr)
 	scriptBytes := []byte(scr)
 
 	s, err := file.ParseScript(scriptBytes)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return script.Parse(s)
+	parsed, err := script.Parse(s)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return parsed, tapScriptTree, nil
 }
 
 // bob spends with challenge transaction
@@ -172,40 +223,61 @@ OP_ROT # get data on top again
 OP_0 # index
 OP_0 # check output
 OP_CHECKCONTRACTVERIFY # check output commitment matches subtrees
-OP_1
+
+# Check Bob's signature.
+%x
+OP_CHECKSIG
 # ====================== CHALLENGE SCRIPT END =======================
 `
 
-func GenerateChallengeStr(taptree []byte) (string, error) {
-	scr := fmt.Sprintf(challengeScript, taptree)
+func GenerateChallengeStr(bobKey *btcec.PublicKey, taptree []byte) (string, error) {
+	scr := fmt.Sprintf(challengeScript, taptree,
+		schnorr.SerializePubKey(bobKey))
 	return scr, nil
 }
 
-func GenerateChallenge(totalLevels int, leaves []string) ([]byte, error) {
+func GenerateChallenge(aliceKey, bobKey *btcec.PublicKey, totalLevels int,
+	leaves []string) ([]byte, *txscript.IndexedTapScriptTree, error) {
+
 	// Send to reveal script at the first level.
-	reveal, err := GenerateReveal(totalLevels, leaves)
+	reveal, _, err := GenerateReveal(aliceKey, bobKey, totalLevels, leaves)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var tapLeaves []txscript.TapLeaf
 	t := txscript.NewBaseTapLeaf(reveal)
 	tapLeaves = append(tapLeaves, t)
+
+	// Add timeout to Bob.
+	timeout, err := GenerateTimeout(bobKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tt := txscript.NewBaseTapLeaf(timeout)
+	tapLeaves = append(tapLeaves, tt)
+
 	tapScriptTree := txscript.AssembleTaprootScriptTree(tapLeaves...)
 	taptree := tapScriptTree.RootNode.TapHash()
 
-	scr, err := GenerateChallengeStr(taptree[:])
+	scr, err := GenerateChallengeStr(bobKey, taptree[:])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	scriptBytes := []byte(scr)
 
 	s, err := file.ParseScript(scriptBytes)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return script.Parse(s)
+	parsed, err := script.Parse(s)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return parsed, tapScriptTree, nil
 }
 
 // reveal script
@@ -344,43 +416,61 @@ OP_ROT # get data on top again
 OP_0 # index
 OP_0 # check output
 OP_CHECKCONTRACTVERIFY # check output commitment matches subtrees
-OP_1
+
+# Check Alice's signature.
+%x
+OP_CHECKSIG
 # ====================== REVEAL SCRIPT END =======================
 `
 
-func GenerateRevealStr(taptree []byte) (string, error) {
-	scr := fmt.Sprintf(revealScript, taptree)
+func GenerateRevealStr(aliceKey *btcec.PublicKey, taptree []byte) (string, error) {
+	scr := fmt.Sprintf(revealScript, taptree,
+		schnorr.SerializePubKey(aliceKey))
 	return scr, nil
 }
 
-func GenerateReveal(level int, leaves []string) ([]byte, error) {
+func GenerateReveal(aliceKey, bobKey *btcec.PublicKey, level int,
+	leaves []string) ([]byte, *txscript.IndexedTapScriptTree, error) {
+
 	// Always send to choose
-	choose, err := GenerateChoose(level, leaves)
+	choose, _, err := GenerateChoose(aliceKey, bobKey, level, leaves)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var tapLeaves []txscript.TapLeaf
 	t := txscript.NewBaseTapLeaf(choose)
 	tapLeaves = append(tapLeaves, t)
+
+	// Add timeout to Alice.
+	timeout, err := GenerateTimeout(aliceKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	tt := txscript.NewBaseTapLeaf(timeout)
+	tapLeaves = append(tapLeaves, tt)
+
 	tapScriptTree := txscript.AssembleTaprootScriptTree(tapLeaves...)
 	taptree := tapScriptTree.RootNode.TapHash()
 
-	fmt.Printf("generating reveal at level=%d to taptree %x\n", level, taptree[:])
-	scr, err := GenerateRevealStr(taptree[:])
+	scr, err := GenerateRevealStr(aliceKey, taptree[:])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	scriptBytes := []byte(scr)
 
 	s, err := file.ParseScript(scriptBytes)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	fmt.Println("generated reveal script:", s)
+	parsed, err := script.Parse(s)
+	if err != nil {
+		return nil, nil, err
+	}
 
-	return script.Parse(s)
+	return parsed, tapScriptTree, nil
 }
 
 var chooseScript = `
@@ -416,69 +506,89 @@ OP_ROT # get data on top again
 OP_0 # index
 OP_0 # check output
 OP_CHECKCONTRACTVERIFY
-OP_1
+
+# Check Bob's signature.
+%x
+OP_CHECKSIG
 # ====================== CHOOSE SCRIPT END =======================
 `
 
-func GenerateChooseStr(taptree []byte) (string, error) {
-	scr := fmt.Sprintf(chooseScript, taptree)
+func GenerateChooseStr(bobKey *btcec.PublicKey,
+	taptree []byte) (string, error) {
+
+	scr := fmt.Sprintf(chooseScript, taptree,
+		schnorr.SerializePubKey(bobKey))
 	return scr, nil
 }
 
 // level 1 == last before leaf.
-func GenerateChoose(level int, leaves []string) ([]byte, error) {
+// returns input script and required output taptree
+func GenerateChoose(aliceKey, bobKey *btcec.PublicKey, level int,
+	leaves []string) ([]byte, *txscript.IndexedTapScriptTree, error) {
+
 	if level < 1 {
-		return nil, fmt.Errorf("level 0 only for leaf")
+		return nil, nil, fmt.Errorf("level 0 only for leaf")
 	}
 
-	var tapScriptTree *txscript.IndexedTapScriptTree
+	var tapLeaves []txscript.TapLeaf
 	// Send to leaves.
 	if level == 1 {
 		var err error
-		tapScriptTree, err = LeafTaptree(leaves)
+		tapLeaves, err = LeafTapLeaves(aliceKey, bobKey, leaves)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	} else {
-		var tapLeaves []txscript.TapLeaf
 		// Send to reveal script one level down.
-		reveal, err := GenerateReveal(level-1, leaves)
+		reveal, _, err := GenerateReveal(aliceKey, bobKey, level-1, leaves)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		t := txscript.NewBaseTapLeaf(reveal)
 		tapLeaves = append(tapLeaves, t)
-
-		tapScriptTree = txscript.AssembleTaprootScriptTree(tapLeaves...)
 	}
 
+	// Add timeout to Bob.
+	timeout, err := GenerateTimeout(bobKey)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	t := txscript.NewBaseTapLeaf(timeout)
+	tapLeaves = append(tapLeaves, t)
+
+	tapScriptTree := txscript.AssembleTaprootScriptTree(tapLeaves...)
 	taptree := tapScriptTree.RootNode.TapHash()
 
-	fmt.Printf("generating choose at level=%d to taptree %x\n", level, taptree[:])
-	scr, err := GenerateChooseStr(taptree[:])
+	scr, err := GenerateChooseStr(bobKey, taptree[:])
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	scriptBytes := []byte(scr)
 
 	s, err := file.ParseScript(scriptBytes)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	fmt.Println("generated choose script:", s)
+	parsed, err := script.Parse(s)
+	if err != nil {
+		return nil, nil, err
+	}
 
-	return script.Parse(s)
+	return parsed, tapScriptTree, nil
 }
 
-func LeafTaptree(leaves []string) (*txscript.IndexedTapScriptTree, error) {
+func LeafTapLeaves(aliceKey, bobKey *btcec.PublicKey,
+	leaves []string) ([]txscript.TapLeaf, error) {
+
 	var tapLeaves []txscript.TapLeaf
 	for pcc, leaf := range leaves {
 		pc := uint16(pcc)
 
 		leafScr, err := GenerateLeaf(
-			pc, string(leaf),
+			aliceKey, pc, string(leaf),
 		)
 		if err != nil {
 			return nil, err
@@ -488,8 +598,7 @@ func LeafTaptree(leaves []string) (*txscript.IndexedTapScriptTree, error) {
 		tapLeaves = append(tapLeaves, t)
 	}
 
-	tapScriptTree := txscript.AssembleTaprootScriptTree(tapLeaves...)
-	return tapScriptTree, nil
+	return tapLeaves, nil
 }
 
 const leafScript = `
@@ -531,7 +640,8 @@ OP_1 # flags, check input
 OP_CHECKCONTRACTVERIFY
 
 # If that checks out, Alice is allowed to take the money.
-OP_1
+%x
+OP_CHECKSIG
 # ====================== LEAF SCRIPT END =======================
 `
 
@@ -549,18 +659,54 @@ func pcToOp(pc uint16) (string, error) {
 	}
 }
 
-func GenerateLeafStr(pc uint16, subscript string) (string, error) {
+func GenerateLeafStr(aliceKey *btcec.PublicKey, pc uint16,
+	subscript string) (string, error) {
+
 	pcStr, err := pcToOp(pc)
 	if err != nil {
 		return "", err
 	}
 
-	scr := fmt.Sprintf(leafScript, pcStr, subscript)
+	scr := fmt.Sprintf(leafScript, pcStr, subscript,
+		schnorr.SerializePubKey(aliceKey))
 	return scr, nil
 }
 
-func GenerateLeaf(pc uint16, subscript string) ([]byte, error) {
-	scr, err := GenerateLeafStr(pc, subscript)
+func GenerateLeaf(aliceKey *btcec.PublicKey, pc uint16,
+	subscript string) ([]byte, error) {
+
+	scr, err := GenerateLeafStr(aliceKey, pc, subscript)
+	if err != nil {
+		return nil, err
+	}
+	scriptBytes := []byte(scr)
+
+	s, err := file.ParseScript(scriptBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	return script.Parse(s)
+}
+
+const timeoutScript = `
+# ====================== TIMEOUT SCRIPT =======================
+80 OP_CHECKSEQUENCEVERIFY OP_DROP # require 128 blocks to have passed.
+
+# If that checks out, the pubkey is allowed to take the money.
+%x
+OP_CHECKSIG
+# ====================== TIMEOUT SCRIPT END =======================
+`
+
+func GenerateTimeoutStr(timeoutKey *btcec.PublicKey) (string, error) {
+	scr := fmt.Sprintf(timeoutScript, schnorr.SerializePubKey(timeoutKey))
+	return scr, nil
+}
+
+func GenerateTimeout(timeoutKey *btcec.PublicKey) ([]byte, error) {
+
+	scr, err := GenerateTimeoutStr(timeoutKey)
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"testing"
@@ -26,6 +27,11 @@ const totalLevels = 5
 var (
 	keyBytes   = txscript.BIP341_NUMS_POINT
 	numsKey, _ = schnorr.ParsePubKey(keyBytes)
+
+	aliceKeyBytes, _ = hex.DecodeString("f0baed8dc3d1fa42f3d9fab1c89010d937208256a1c70008a57ad45d98432fdd")
+	aliceKey, _      = btcec.PrivKeyFromBytes(aliceKeyBytes)
+	bobKeyBytes, _   = hex.DecodeString("98e40b648bd82e45d98db669328f799bd7c610dd500a9b02c59d54c222ac2b75")
+	bobKey, _        = btcec.PrivKeyFromBytes(bobKeyBytes)
 )
 
 func main() {
@@ -50,14 +56,16 @@ func run() error {
 		return err
 	}
 
-	mem := miner.GetRawMempool()
-	fmt.Println(spew.Sdump(mem))
-
+	// Activate segwit and taproot.
 	_ = miner.GenerateBlocks(450)
+	_ = aliceKey
+	_ = bobKey
 
-	//fmt.Println(spew.Sdump(blocks))
-
-	contract, outputSpender, err := contractOutput()
+	// Create the contract output. This will usually be an output the
+	// contract parties both fund with their stake. At this point they also
+	// agree on the maximum number of steps the computation can take. In
+	// this example we are using at most 2^5 == 32 steps.
+	contract, outputSpender, err := contractOutput(totalLevels)
 	if err != nil {
 		return err
 	}
@@ -72,6 +80,7 @@ func run() error {
 	// TODO: Bob should do his own trace
 	x := []byte{startX}
 
+	fmt.Println("posting question")
 	tx, outputSpender, err := postQuestion(x, wire.OutPoint{
 		Hash:  *txid,
 		Index: 0,
@@ -80,7 +89,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	//fmt.Println("question tx:", spew.Sdump(tx))
+	fmt.Println("question tx:", spew.Sdump(tx))
 	txid, err = miner.SendTransaction(tx)
 	if err != nil {
 		return err
@@ -112,6 +121,7 @@ func run() error {
 	traceStartIndex := 0
 	traceEndIndex := len(tr) - 1
 
+	fmt.Println("posting answer")
 	answerTx, outputSpender, err := postAnswer(
 		traceStartIndex, traceEndIndex, tr,
 		wire.OutPoint{
@@ -122,7 +132,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	//fmt.Println("answer tx: ", spew.Sdump(answerTx))
+	fmt.Println("answer tx: ", spew.Sdump(answerTx))
 	txid, err = miner.SendTransaction(answerTx)
 	if err != nil {
 		return err
@@ -216,80 +226,16 @@ func run() error {
 }
 
 func generateTrace(questionTx *wire.MsgTx) ([][][]byte, error) {
-	x := questionTx.TxIn[0].Witness[0][0]
+	x := questionTx.TxIn[0].Witness[1][0]
 	fmt.Println("found x", x)
+	if x != startX {
+		panic("wrong x found in tx witness")
+	}
+
 	startStack := fmt.Sprintf("%02x <> <>", x)
 	fmt.Println("start stack:", startStack)
 	return trace.GetTrace(scripts.ScriptSteps, startStack)
 }
-
-// commitment [from, to)
-//func subCommitment(from, to int, trace [][][]byte) ([]byte, error) {
-//
-//	fmt.Println("sub commitment", from, to)
-//	if to-from == 2 {
-//		return leafCommitment(from, trace[from], trace[to-1])
-//	}
-//
-//	if (to-from)%2 != 0 {
-//		return nil, fmt.Errorf("incompatible %d - %d", from, to)
-//	}
-//
-//	mid := from + (to-from)/2
-//	sub1, err := subCommitment(from, mid, trace)
-//	if err != nil {
-//		return nil, err
-//	}
-//	sub2, err := subCommitment(mid, to, trace)
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	tr := sha256.New()
-//	tr.Write(sub1)
-//	tr.Write(sub2)
-//	hTr := tr.Sum(nil)
-//
-//	startState := trace[from]
-//	endState := trace[to-1]
-//
-//	var commit bytes.Buffer
-//	for _, b := range startState {
-//		commit.Write(b)
-//	}
-//	for _, b := range endState {
-//		commit.Write(b)
-//	}
-//
-//	commit.Write(hTr)
-//	hCommit := sha256.Sum256(commit.Bytes())
-//
-//	return hCommit[:], nil
-//}
-//
-//// state []byte{pc, i, x}
-//func leafCommitment(step int, startState, endState [][]byte) ([]byte, error) {
-//
-//	fmt.Println("leaf commitment", step, step+1)
-//	emptyHash := sha256.Sum256(nil)
-//	emptyTrace := sha256.New()
-//	emptyTrace.Write(emptyHash[:])
-//	emptyTrace.Write(emptyHash[:])
-//	hEmpty := emptyTrace.Sum(nil)
-//
-//	var inputCommit bytes.Buffer
-//	for _, b := range startState {
-//		inputCommit.Write(b)
-//	}
-//	for _, b := range endState {
-//		inputCommit.Write(b)
-//	}
-//
-//	inputCommit.Write(hEmpty)
-//	hInputCommit := sha256.Sum256(inputCommit.Bytes())
-//
-//	return hInputCommit[:], nil
-//}
 
 func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
 	*wire.MsgTx, *OutputSpender, error) {
@@ -310,16 +256,6 @@ func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
 		PreviousOutPoint: out,
 	})
 
-	witness := wire.TxWitness{}
-	witness = append(witness, startState...)
-
-	ctrlBlock, err := spender.Witness()
-	if err != nil {
-		return nil, nil, err
-	}
-	witness = append(witness, ctrlBlock...)
-	tx.TxIn[0].Witness = witness
-
 	// Send to own address
 	randKey, err := btcec.NewPrivateKey()
 	if err != nil {
@@ -328,17 +264,34 @@ func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
 
 	outputKey := randKey.PubKey()
 
-	pkScript, taptree, err := toPkScript(outputKey, nil)
+	pkScript, taptree, err := toPkScriptTree(outputKey, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	tx.AddTxOut(&wire.TxOut{
+	prevOut := &wire.TxOut{
 		Value:    value,
 		PkScript: pkScript,
-	})
+	}
+	tx.AddTxOut(prevOut)
+
+	sig, err := spender.Sign(tx, aliceKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	witness := wire.TxWitness{}
+	witness = append(witness, sig)
+	witness = append(witness, startState...)
+
+	ctrlBlock, err := spender.CtrlBlock()
+	if err != nil {
+		return nil, nil, err
+	}
+	witness = append(witness, ctrlBlock...)
+	tx.TxIn[0].Witness = witness
 
 	return tx, &OutputSpender{
+		prevOut:     prevOut,
 		internalKey: outputKey,
 		taptree:     taptree,
 	}, nil
@@ -366,43 +319,14 @@ func postChoose(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoin
 	tx.AddTxIn(&wire.TxIn{
 		PreviousOutPoint: out,
 	})
-
-	witness := wire.TxWitness{}
-	// TODO: actually choose
-	witness = append(witness, []byte{0x01})
-	witness = append(witness, hSub2[:])
-	witness = append(witness, hSub1[:])
-
-	ctrlBlock, err := spender.Witness()
-	if err != nil {
-		return nil, nil, 0, 0, err
-	}
-	witness = append(witness, ctrlBlock...)
-	tx.TxIn[0].Witness = witness
-	fmt.Println("choose witness: ", printWitness(witness))
-
 	// Send to Choose output
 	// TODO: reveal/leaf
-	var outputScriptTree *txscript.IndexedTapScriptTree
-	var scriptStr string
-	if level == 1 {
-		scriptStr = "leaf"
-		outputScriptTree, err = scripts.LeafTaptree(scripts.ScriptSteps)
-		if err != nil {
-			return nil, nil, 0, 0, err
-		}
-	} else {
 
-		scriptStr = "reveal"
-		script, err := scripts.GenerateReveal(level-1, scripts.ScriptSteps)
-		if err != nil {
-			return nil, nil, 0, 0, err
-		}
-
-		var tapLeaves []txscript.TapLeaf
-		t := txscript.NewBaseTapLeaf(script)
-		tapLeaves = append(tapLeaves, t)
-		outputScriptTree = txscript.AssembleTaprootScriptTree(tapLeaves...)
+	_, outputScriptTree, err := scripts.GenerateChoose(
+		aliceKey.PubKey(), bobKey.PubKey(), level, scripts.ScriptSteps,
+	)
+	if err != nil {
+		return nil, nil, 0, 0, err
 	}
 
 	//outputCommit := sha256.New()
@@ -422,14 +346,35 @@ func postChoose(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoin
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
-	fmt.Printf("choose tx sending to %s pkscript %x\n", scriptStr, pkScript)
 
-	tx.AddTxOut(&wire.TxOut{
+	prevOut := &wire.TxOut{
 		Value:    value,
 		PkScript: pkScript,
-	})
+	}
+	tx.AddTxOut(prevOut)
+
+	sig, err := spender.Sign(tx, bobKey)
+	if err != nil {
+		return nil, nil, 0, 0, err
+	}
+	witness := wire.TxWitness{}
+	witness = append(witness, sig)
+
+	// TODO: actually choose
+	witness = append(witness, []byte{0x01})
+	witness = append(witness, hSub2[:])
+	witness = append(witness, hSub1[:])
+
+	ctrlBlock, err := spender.CtrlBlock()
+	if err != nil {
+		return nil, nil, 0, 0, err
+	}
+	witness = append(witness, ctrlBlock...)
+	tx.TxIn[0].Witness = witness
+	fmt.Println("choose witness: ", printWitness(witness))
 
 	return tx, &OutputSpender{
+		prevOut:     prevOut,
 		internalKey: tweaked,
 		taptree:     taptree,
 	}, startIndex, midIndex, nil
@@ -499,23 +444,9 @@ func postReveal(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoin
 		PreviousOutPoint: out,
 	})
 
-	witness := wire.TxWitness{}
-	witness = append(witness, sub2Commit)
-	witness = append(witness, endState...)
-	witness = append(witness, sub1Commit)
-	witness = append(witness, midState...)
-	witness = append(witness, startState...)
-
-	ctrlBlock, err := spender.Witness()
-	if err != nil {
-		return nil, nil, err
-	}
-	witness = append(witness, ctrlBlock...)
-	tx.TxIn[0].Witness = witness
-	fmt.Println("reveal witness:", printWitness(witness))
-
-	// Send to Choose output
-	choose, err := scripts.GenerateChoose(level, scripts.ScriptSteps)
+	_, outputScriptTree, err := scripts.GenerateReveal(
+		aliceKey.PubKey(), bobKey.PubKey(), level, scripts.ScriptSteps,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -533,17 +464,40 @@ func postReveal(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoin
 		numsKey, commit[:],
 	)
 
-	pkScript, taptree, err := toPkScript(tweaked, choose)
+	pkScript, taptree, err := toPkScriptTree(tweaked, outputScriptTree)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	tx.AddTxOut(&wire.TxOut{
+	prevOut := &wire.TxOut{
 		Value:    value,
 		PkScript: pkScript,
-	})
+	}
+	tx.AddTxOut(prevOut)
+
+	sig, err := spender.Sign(tx, aliceKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	witness := wire.TxWitness{}
+	witness = append(witness, sig)
+
+	witness = append(witness, sub2Commit)
+	witness = append(witness, endState...)
+	witness = append(witness, sub1Commit)
+	witness = append(witness, midState...)
+	witness = append(witness, startState...)
+
+	ctrlBlock, err := spender.CtrlBlock()
+	if err != nil {
+		return nil, nil, err
+	}
+	witness = append(witness, ctrlBlock...)
+	tx.TxIn[0].Witness = witness
+	fmt.Println("reveal witness:", printWitness(witness))
 
 	return tx, &OutputSpender{
+		prevOut:     prevOut,
 		internalKey: tweaked,
 		taptree:     taptree,
 	}, nil
@@ -553,10 +507,12 @@ func postChallenge(answerTx *wire.MsgTx, out wire.OutPoint, spender *OutputSpend
 	*wire.MsgTx, *OutputSpender, error) {
 
 	wit := answerTx.TxIn[0].Witness
-	//fmt.Println("answer tx input witness:", spew.Sdump(wit))
+	fmt.Println("answer tx input witness:", spew.Sdump(wit))
 	inputCommit := sha256.New()
 	var stack [][]byte
-	for i := 0; i < 7; i++ {
+
+	// Note: index 0 is signature
+	for i := 1; i < 8; i++ {
 		stack = append(stack, wit[i])
 	}
 
@@ -576,18 +532,9 @@ func postChallenge(answerTx *wire.MsgTx, out wire.OutPoint, spender *OutputSpend
 		PreviousOutPoint: out,
 	})
 
-	witness := wire.TxWitness{}
-	witness = append(witness, commit)
-
-	ctrlBlock, err := spender.Witness()
-	if err != nil {
-		return nil, nil, err
-	}
-	witness = append(witness, ctrlBlock...)
-	tx.TxIn[0].Witness = witness
-
-	// Send to Reveal output
-	reveal, err := scripts.GenerateReveal(totalLevels, scripts.ScriptSteps)
+	_, outputScriptTree, err := scripts.GenerateChallenge(
+		aliceKey.PubKey(), bobKey.PubKey(), totalLevels, scripts.ScriptSteps,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -596,17 +543,35 @@ func postChallenge(answerTx *wire.MsgTx, out wire.OutPoint, spender *OutputSpend
 		numsKey, commit[:],
 	)
 
-	pkScript, taptree, err := toPkScript(tweaked, reveal)
+	pkScript, taptree, err := toPkScriptTree(tweaked, outputScriptTree)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	tx.AddTxOut(&wire.TxOut{
+	prevOut := &wire.TxOut{
 		Value:    value,
 		PkScript: pkScript,
-	})
+	}
+	tx.AddTxOut(prevOut)
+
+	sig, err := spender.Sign(tx, bobKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	witness := wire.TxWitness{}
+	witness = append(witness, sig)
+
+	witness = append(witness, commit)
+
+	ctrlBlock, err := spender.CtrlBlock()
+	if err != nil {
+		return nil, nil, err
+	}
+	witness = append(witness, ctrlBlock...)
+	tx.TxIn[0].Witness = witness
 
 	return tx, &OutputSpender{
+		prevOut:     prevOut,
 		internalKey: tweaked,
 		taptree:     taptree,
 	}, nil
@@ -689,21 +654,9 @@ func postAnswer(startIndex, endIndex int, tr [][][]byte, out wire.OutPoint,
 		PreviousOutPoint: out,
 	})
 
-	witness := wire.TxWitness{}
-	witness = append(witness, traceCommitment)
-	witness = append(witness, endState...)
-	witness = append(witness, startState...)
-
-	ctrlBlock, err := spender.Witness()
-	if err != nil {
-		return nil, nil, err
-	}
-	witness = append(witness, ctrlBlock...)
-	tx.TxIn[0].Witness = witness
-	fmt.Println("answer witness:", printWitness(witness))
-
-	// Send to Challenge output
-	chal, err := scripts.GenerateChallenge(totalLevels, scripts.ScriptSteps)
+	_, outputScriptTree, err := scripts.GenerateAnswer(
+		aliceKey.PubKey(), bobKey.PubKey(), totalLevels, scripts.ScriptSteps,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -724,17 +677,38 @@ func postAnswer(startIndex, endIndex int, tr [][][]byte, out wire.OutPoint,
 		numsKey, commit[:],
 	)
 
-	pkScript, taptree, err := toPkScript(tweaked, chal)
+	pkScript, taptree, err := toPkScriptTree(tweaked, outputScriptTree)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	tx.AddTxOut(&wire.TxOut{
+	prevOut := &wire.TxOut{
 		Value:    value,
 		PkScript: pkScript,
-	})
+	}
+	tx.AddTxOut(prevOut)
+
+	sig, err := spender.Sign(tx, aliceKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	witness := wire.TxWitness{}
+	witness = append(witness, sig)
+
+	witness = append(witness, traceCommitment)
+	witness = append(witness, endState...)
+	witness = append(witness, startState...)
+
+	ctrlBlock, err := spender.CtrlBlock()
+	if err != nil {
+		return nil, nil, err
+	}
+	witness = append(witness, ctrlBlock...)
+	tx.TxIn[0].Witness = witness
+	fmt.Println("answer witness:", printWitness(witness))
 
 	return tx, &OutputSpender{
+		prevOut:     prevOut,
 		internalKey: tweaked,
 		taptree:     taptree,
 	}, nil
@@ -748,18 +722,10 @@ func postQuestion(x []byte, out wire.OutPoint, spender *OutputSpender) (
 		PreviousOutPoint: out,
 	})
 
-	witness := wire.TxWitness{}
-	witness = append(witness, x)
-
-	ctrlBlock, err := spender.Witness()
-	if err != nil {
-		return nil, nil, err
-	}
-	witness = append(witness, ctrlBlock...)
-	tx.TxIn[0].Witness = witness
-
 	// Send to answer output
-	ans, err := scripts.GenerateAnswer(totalLevels, scripts.ScriptSteps)
+	_, outputScriptTree, err := scripts.GenerateQuestion(
+		aliceKey.PubKey(), bobKey.PubKey(), totalLevels, scripts.ScriptSteps,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -773,48 +739,101 @@ func postQuestion(x []byte, out wire.OutPoint, spender *OutputSpender) (
 	)
 
 	fmt.Printf("outputcommit: %x\n", hOutputCommit[:])
-	pkScript, taptree, err := toPkScript(tweaked, ans)
+	pkScript, taptree, err := toPkScriptTree(tweaked, outputScriptTree)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	tx.AddTxOut(&wire.TxOut{
+	prevOut := &wire.TxOut{
 		Value:    value,
 		PkScript: pkScript,
-	})
+	}
+
+	tx.AddTxOut(prevOut)
+
+	sig, err := spender.Sign(tx, bobKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	witness := wire.TxWitness{}
+	witness = append(witness, sig)
+
+	witness = append(witness, x)
+
+	ctrlBlock, err := spender.CtrlBlock()
+	if err != nil {
+		return nil, nil, err
+	}
+	witness = append(witness, ctrlBlock...)
+	tx.TxIn[0].Witness = witness
 
 	return tx, &OutputSpender{
+		prevOut:     prevOut,
 		internalKey: tweaked,
 		taptree:     taptree,
 	}, nil
 }
 
+func signTx(tx *wire.MsgTx, key *btcec.PrivateKey, prevOut *wire.TxOut,
+	tapLeaf txscript.TapLeaf) ([]byte, error) {
+
+	prevOutFetcher := txscript.NewCannedPrevOutputFetcher(
+		prevOut.PkScript, prevOut.Value,
+	)
+
+	sigHashes := txscript.NewTxSigHashes(tx, prevOutFetcher)
+
+	fmt.Println("signing tx", spew.Sdump(tx))
+	fmt.Println("prevOut", spew.Sdump(prevOut))
+	fmt.Println("tapLeaf", spew.Sdump(tapLeaf))
+	fmt.Printf("with key %x\n", schnorr.SerializePubKey(key.PubKey()))
+
+	return txscript.RawTxInTapscriptSignature(
+		tx, sigHashes, 0, prevOut.Value, prevOut.PkScript, tapLeaf,
+		txscript.SigHashDefault, key,
+	)
+}
+
 type OutputSpender struct {
+	prevOut     *wire.TxOut
 	internalKey *btcec.PublicKey
 	taptree     *txscript.IndexedTapScriptTree
 	scriptIndex int
 }
 
-func (o *OutputSpender) Witness() (wire.TxWitness, error) {
+func (o *OutputSpender) Sign(tx *wire.MsgTx, key *btcec.PrivateKey) (
+	[]byte, error) {
+
+	tapLeaf := o.taptree.LeafMerkleProofs[o.scriptIndex].TapLeaf
+	return signTx(tx, key, o.prevOut, tapLeaf)
+}
+
+func (o *OutputSpender) CtrlBlock() (
+	wire.TxWitness, error) {
 
 	script := o.taptree.LeafMerkleProofs[o.scriptIndex].TapLeaf.Script
 	ctrlBlock := o.taptree.LeafMerkleProofs[o.scriptIndex].ToControlBlock(
 		o.internalKey,
 	)
-
 	ctrlBlockBytes, err := ctrlBlock.ToBytes()
 	if err != nil {
 		return nil, err
 	}
 
-	return wire.TxWitness{script, ctrlBlockBytes}, nil
+	var witness wire.TxWitness
+	witness = append(witness, script)
+	witness = append(witness, ctrlBlockBytes)
+
+	return witness, nil
 }
 
-func toPkScriptTree(pubKey *btcec.PublicKey, scriptTree *txscript.IndexedTapScriptTree) ([]byte,
-	*txscript.IndexedTapScriptTree, error) {
+func toPkScriptTree(pubKey *btcec.PublicKey, scriptTree *txscript.IndexedTapScriptTree) (
+	[]byte, *txscript.IndexedTapScriptTree, error) {
 
-	taproot := scriptTree.RootNode.TapHash()
-
+	var taproot [32]byte
+	if scriptTree != nil {
+		taproot = scriptTree.RootNode.TapHash()
+	}
 	tapKey := txscript.ComputeTaprootOutputKey(
 		pubKey, taproot[:],
 	)
@@ -830,47 +849,44 @@ func toPkScriptTree(pubKey *btcec.PublicKey, scriptTree *txscript.IndexedTapScri
 	return pk, scriptTree, nil
 }
 
-func toPkScript(pubKey *btcec.PublicKey, script []byte) ([]byte,
-	*txscript.IndexedTapScriptTree, error) {
+// contractOutput creates the initial contract output.
+func contractOutput(numLevels int) (*wire.TxOut, *OutputSpender, error) {
+
+	// The contract output must be spent by Bob posting the question...
+	q, _, err := scripts.GenerateQuestion(
+		aliceKey.PubKey(), bobKey.PubKey(), numLevels, scripts.ScriptSteps,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	var tapLeaves []txscript.TapLeaf
-	t := txscript.NewBaseTapLeaf(script)
+	t := txscript.NewBaseTapLeaf(q)
 	tapLeaves = append(tapLeaves, t)
-	tapScriptTree := txscript.AssembleTaprootScriptTree(tapLeaves...)
-	taproot := tapScriptTree.RootNode.TapHash()
 
-	tapKey := txscript.ComputeTaprootOutputKey(
-		pubKey, taproot[:],
-	)
-	fmt.Printf("internal key %x\n", schnorr.SerializePubKey(pubKey))
-	fmt.Printf("taproot  %x\n", taproot[:])
-	fmt.Printf("tapkey %x\n", schnorr.SerializePubKey(tapKey))
-
-	pk, err := txscript.PayToTaprootScript(tapKey)
+	// .. or by Alice after a timeout.
+	timeout, err := scripts.GenerateTimeout(aliceKey.PubKey())
 	if err != nil {
 		return nil, nil, err
 	}
 
-	return pk, tapScriptTree, nil
-}
+	tt := txscript.NewBaseTapLeaf(timeout)
+	tapLeaves = append(tapLeaves, tt)
+	outputScriptTree := txscript.AssembleTaprootScriptTree(tapLeaves...)
 
-func contractOutput() (*wire.TxOut, *OutputSpender, error) {
-
-	q, err := scripts.GenerateQuestion(totalLevels, scripts.ScriptSteps)
+	pkScript, tapScriptTree, err := toPkScriptTree(numsKey, outputScriptTree)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	pkScript, tapScriptTree, err := toPkScript(numsKey, q)
-	if err != nil {
-		return nil, nil, err
+	prevOut := &wire.TxOut{
+		Value:    10_000_000_000,
+		PkScript: pkScript,
 	}
 
-	return &wire.TxOut{
-			Value:    10_000_000_000,
-			PkScript: pkScript,
-		}, &OutputSpender{
-			internalKey: numsKey,
-			taptree:     tapScriptTree,
-		}, nil
+	return prevOut, &OutputSpender{
+		prevOut:     prevOut,
+		internalKey: numsKey,
+		taptree:     tapScriptTree,
+	}, nil
 }
