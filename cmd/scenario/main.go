@@ -149,7 +149,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	//fmt.Println("challenge tx: ", spew.Sdump(challengeTx))
+	fmt.Println("challenge tx: ", spew.Sdump(challengeTx))
 	txid, err = miner.SendTransaction(challengeTx)
 	if err != nil {
 		return err
@@ -205,7 +205,7 @@ func run() error {
 
 	// Alice cleaim leaf
 	// TODO: set script index to chosen leaf
-	outputSpender.scriptIndex = 0
+	//outputSpender.scriptIndex = 0
 	leafTx, _, err := postLeaf(
 		tr[traceStartIndex],
 		wire.OutPoint{
@@ -277,6 +277,14 @@ func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
 	}
 	tx.AddTxOut(prevOut)
 
+	// Use PC from start state to determine which leaf to use
+	fmt.Println("startState:", spew.Sdump(startState))
+	pc := startState[2]
+	spender.scriptIndex = 0
+	if len(pc) != 0 {
+		spender.scriptIndex = int(pc[0])
+	}
+
 	sig, err := spender.Sign(tx, aliceKey)
 	if err != nil {
 		return nil, nil, err
@@ -312,7 +320,7 @@ func postChoose(revealTx *wire.MsgTx, level, startIndex, endIndex int, tr [][][]
 
 	// Get Alice's revealed state from the tx witness.
 	revealWitness := revealTx.TxIn[0].Witness
-	fmt.Println("reveal witness", spew.Sdump(revealWitness))
+	//fmt.Println("reveal witness", spew.Sdump(revealWitness))
 
 	aliceSub1 := sha256.New()
 	aliceSub1.Write(revealWitness[11]) // start_pc
@@ -557,7 +565,7 @@ func postChallenge(answerTx *wire.MsgTx, out wire.OutPoint, spender *OutputSpend
 	*wire.MsgTx, *OutputSpender, error) {
 
 	wit := answerTx.TxIn[0].Witness
-	fmt.Println("answer tx input witness:", spew.Sdump(wit))
+	//fmt.Println("answer tx input witness:", spew.Sdump(wit))
 	inputCommit := sha256.New()
 	var stack [][]byte
 
@@ -833,10 +841,10 @@ func signTx(tx *wire.MsgTx, key *btcec.PrivateKey, prevOut *wire.TxOut,
 
 	sigHashes := txscript.NewTxSigHashes(tx, prevOutFetcher)
 
-	fmt.Println("signing tx", spew.Sdump(tx))
-	fmt.Println("prevOut", spew.Sdump(prevOut))
-	fmt.Println("tapLeaf", spew.Sdump(tapLeaf))
-	fmt.Printf("with key %x\n", schnorr.SerializePubKey(key.PubKey()))
+	//	fmt.Println("signing tx", spew.Sdump(tx))
+	//	fmt.Println("prevOut", spew.Sdump(prevOut))
+	//	fmt.Println("tapLeaf", spew.Sdump(tapLeaf))
+	//	fmt.Printf("with key %x\n", schnorr.SerializePubKey(key.PubKey()))
 
 	return txscript.RawTxInTapscriptSignature(
 		tx, sigHashes, 0, prevOut.Value, prevOut.PkScript, tapLeaf,
