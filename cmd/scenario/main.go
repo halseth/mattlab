@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -106,29 +107,18 @@ func run() error {
 	fmt.Println(txid)
 	_ = miner.GenerateBlocks(1)
 
-	// Alice generates trace from looking at X in the witness.
-	//	tr, err := generateTrace(tx)
-	//	if err != nil {
-	//		return err
-	//	}
+	// Bob generates his own trace.
+	bobTrace, err := generateTrace(tx)
+	if err != nil {
+		return err
+	}
+	_ = bobTrace
 
 	tr := aliceTrace
 
 	fmt.Println("got trace")
 	print.PrintTrace(tr)
 
-	// each trace step is generated x,i, pc. Reverse it to be compatible
-	//	var tempTr [][][]byte
-	//	for _, step := range tr {
-	//		st := make([][]byte, len(step))
-	//		for i := 0; i < len(step); i++ {
-	//			st[i] = step[len(step)-i-1]
-	//		}
-	//
-	//		tempTr = append(tempTr, st)
-	//	}
-	//
-	//	tr = tempTr
 	traceStartIndex := 0
 	traceEndIndex := len(tr) - 1
 
@@ -193,8 +183,9 @@ func run() error {
 		var chooseTx *wire.MsgTx
 
 		chooseTx, outputSpender, traceStartIndex, traceEndIndex, err = postChoose(
+			revealTx,
 			level,
-			traceStartIndex, traceEndIndex, tr,
+			traceStartIndex, traceEndIndex, bobTrace,
 			wire.OutPoint{
 				Hash:  *txid,
 				Index: 0,
@@ -301,6 +292,14 @@ func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
 	witness = append(witness, ctrlBlock...)
 	tx.TxIn[0].Witness = witness
 
+	check := ""
+	for i := 0; i < len(startState); i++ {
+		el := startState[len(startState)-i-1]
+		check += fmt.Sprintf("%x|", el)
+	}
+
+	fmt.Println("posting leaf from start state", check)
+
 	return tx, &OutputSpender{
 		prevOut:     prevOut,
 		internalKey: outputKey,
@@ -308,8 +307,32 @@ func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
 	}, nil
 }
 
-func postChoose(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoint, spender *OutputSpender) (
+func postChoose(revealTx *wire.MsgTx, level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoint, spender *OutputSpender) (
 	*wire.MsgTx, *OutputSpender, int, int, error) {
+
+	// Get Alice's revealed state from the tx witness.
+	revealWitness := revealTx.TxIn[0].Witness
+	fmt.Println("reveal witness", spew.Sdump(revealWitness))
+
+	aliceSub1 := sha256.New()
+	aliceSub1.Write(revealWitness[11]) // start_pc
+	aliceSub1.Write(revealWitness[10]) // start_i
+	aliceSub1.Write(revealWitness[9])  // start_x
+	aliceSub1.Write(revealWitness[8])  // mid_pc
+	aliceSub1.Write(revealWitness[7])  // mid_i
+	aliceSub1.Write(revealWitness[6])  // mid_x
+	aliceSub1.Write(revealWitness[5])  // sub1_commit
+	hAliceSub1 := aliceSub1.Sum(nil)
+
+	aliceSub2 := sha256.New()
+	aliceSub2.Write(revealWitness[8]) // mid_pc
+	aliceSub2.Write(revealWitness[7]) // mid_i
+	aliceSub2.Write(revealWitness[6]) // mid_x
+	aliceSub2.Write(revealWitness[4]) // end_pc
+	aliceSub2.Write(revealWitness[3]) // end_i
+	aliceSub2.Write(revealWitness[2]) // end_x
+	aliceSub2.Write(revealWitness[1]) // sub2_commit
+	hAliceSub2 := aliceSub2.Sum(nil)
 
 	midIndex := startIndex + (endIndex-startIndex)/2
 	fmt.Println("start", startIndex, "mid", midIndex, "end", endIndex)
@@ -323,15 +346,33 @@ func postChoose(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoin
 		return nil, nil, 0, 0, err
 	}
 
+	choice := []byte{0x01}
 	hSub1 := sha256.Sum256(sub1)
 	hSub2 := sha256.Sum256(sub2)
+	commit := hAliceSub1[:]
+	nextStart := startIndex
+	nextEnd := midIndex
+
+	if !bytes.Equal(hSub1[:], hAliceSub1) {
+		choice = []byte{0x01}
+		commit = hAliceSub1[:]
+		nextStart = startIndex
+		nextEnd = midIndex
+
+		fmt.Printf("hSub1=%x hAliceSub1=%x going hsub1\n", hSub1, hAliceSub1)
+	} else if !bytes.Equal(hSub2[:], hAliceSub2) {
+		choice = []byte{}
+		commit = hAliceSub2[:]
+		nextStart = midIndex
+		nextEnd = endIndex
+
+		fmt.Printf("hSub2=%x hAliceSub2=%x going hsub2\n", hSub2, hAliceSub2)
+	}
 
 	tx := wire.NewMsgTx(2)
 	tx.AddTxIn(&wire.TxIn{
 		PreviousOutPoint: out,
 	})
-	// Send to Choose output
-	// TODO: reveal/leaf
 
 	_, outputScriptTree, err := scripts.GenerateChoose(
 		aliceKey.PubKey(), bobKey.PubKey(), level, scripts.ScriptSteps,
@@ -341,7 +382,6 @@ func postChoose(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoin
 	}
 
 	//outputCommit := sha256.New()
-	commit := hSub1[:]
 
 	//outputCommit.Write(hSub1[:])
 	//outputCommit.Write(hSub2[:])
@@ -371,10 +411,9 @@ func postChoose(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoin
 	witness := wire.TxWitness{}
 	witness = append(witness, sig)
 
-	// TODO: actually choose
-	witness = append(witness, []byte{0x01})
-	witness = append(witness, hSub2[:])
-	witness = append(witness, hSub1[:])
+	witness = append(witness, choice)
+	witness = append(witness, hAliceSub2[:])
+	witness = append(witness, hAliceSub1[:])
 
 	ctrlBlock, err := spender.CtrlBlock()
 	if err != nil {
@@ -388,7 +427,7 @@ func postChoose(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoin
 		prevOut:     prevOut,
 		internalKey: tweaked,
 		taptree:     taptree,
-	}, startIndex, midIndex, nil
+	}, nextStart, nextEnd, nil
 }
 
 func catState(w io.Writer, state [][]byte) error {
