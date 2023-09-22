@@ -144,7 +144,120 @@ node = h( start_pc|start_i|start_x|end_pc|end_i|end_x|h( h(sub_node1)|h(sub_node
 leaf = h( start_pc|start_i|start_x|end_pc|end_i|end_x|h( h(<>)|h(<>) ) )
 ```
 
--- insert mermaid tree ---
+```mermaid
+---
+title: MATT execution trace tree
+---
+graph BT
+subgraph s0
+subgraph s0start [Start]
+s0sx[x = 2]
+s0si[i = 0]
+s0spc[pc = 0]
+end
+subgraph s0fin [End]
+s0fx[x = 2]
+s0fi[i = 0]
+s0fpc[pc = 1]
+end
+end
+subgraph s1
+subgraph s1start [Start]
+s1sx[x = 2]
+s1si[i = 0]
+s1spc[pc = 1]
+end
+subgraph s1fin [End]
+s1fx[x = 4]
+s1fi[i = 1]
+s1fpc[pc = 0]
+end
+end
+subgraph s2
+subgraph s2start [Start]
+s2sx[x = 4]
+s2si[i = 1]
+s2spc[pc = 0]
+end
+subgraph s2fin [End]
+s2fx[x = 4]
+s2fi[i = 1]
+s2fpc[pc = 1]
+end
+end
+subgraph s3
+subgraph s3start [Start]
+s3sx[x = 4]
+s3si[i = 1]
+s3spc[pc = 1]
+end
+subgraph s3fin [End]
+s3fx[x = 8]
+s3fi[i = 2]
+s3fpc[pc = 0]
+end
+end
+subgraph s01 [s0..1]
+subgraph s01start [Start]
+direction LR
+s01sx[x = 2]
+s01si[i = 0]
+s01spc[pc = 0]
+end
+subgraph s01fin [End]
+direction LR
+s01fx[x = 4]
+s01fi[i = 1]
+s01fpc[pc = 0]
+end
+subgraph s01h ["h(h(s0)|h(s1))"]
+s0h["h(s0)"]
+s1h["h(s1)"]
+end
+end
+s0-->s0h
+s1-->s1h
+subgraph s23 [s2..3]
+subgraph s23start [Start]
+direction LR
+s23sx[x = 4]
+s23si[i = 1]
+s23spc[pc = 0]
+end
+subgraph s23fin [End]
+direction LR
+s23fx[x = 8]
+s23fi[i = 2]
+s23fpc[pc = 0]
+end
+subgraph s23h ["h(h(s2)|h(s3))"]
+s2h["h(s2)"]
+s3h["h(s3)"]
+end
+end
+s2-->s2h
+s3-->s3h
+subgraph s03 [s0..3]
+subgraph s03start [Start]
+direction LR
+s03sx[x = 2]
+s03si[i = 0]
+s03spc[pc = 0]
+end
+subgraph s03fin [End]
+direction LR
+s03fx[x = 8]
+s03fi[i = 2]
+s03fpc[pc = 0]
+end
+subgraph s03h ["h(h(s0..1)|h(s2..3))"]
+s01sh["h(s0..1)"]
+s23sh["h(s2..3)"]
+end
+end
+s01h-->s01sh
+s23h-->s23sh
+```
 
 (Note that for advanced programs with more state to keep track of, you would
 probably have the state be its own merkle tree the script would index into.
