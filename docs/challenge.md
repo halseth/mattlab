@@ -144,120 +144,23 @@ node = h( start_pc|start_i|start_x|end_pc|end_i|end_x|h( h(sub_node1)|h(sub_node
 leaf = h( start_pc|start_i|start_x|end_pc|end_i|end_x|h( h(<>)|h(<>) ) )
 ```
 
+The below diagram will show what this would look like for 4 state transitions:
+
 ```mermaid
----
-title: MATT execution trace tree
----
-graph BT
-subgraph s0
-subgraph s0start [Start]
-s0sx[x = 2]
-s0si[i = 0]
-s0spc[pc = 0]
-end
-subgraph s0fin [End]
-s0fx[x = 2]
-s0fi[i = 0]
-s0fpc[pc = 1]
-end
-end
-subgraph s1
-subgraph s1start [Start]
-s1sx[x = 2]
-s1si[i = 0]
-s1spc[pc = 1]
-end
-subgraph s1fin [End]
-s1fx[x = 4]
-s1fi[i = 1]
-s1fpc[pc = 0]
-end
-end
-subgraph s2
-subgraph s2start [Start]
-s2sx[x = 4]
-s2si[i = 1]
-s2spc[pc = 0]
-end
-subgraph s2fin [End]
-s2fx[x = 4]
-s2fi[i = 1]
-s2fpc[pc = 1]
-end
-end
-subgraph s3
-subgraph s3start [Start]
-s3sx[x = 4]
-s3si[i = 1]
-s3spc[pc = 1]
-end
-subgraph s3fin [End]
-s3fx[x = 8]
-s3fi[i = 2]
-s3fpc[pc = 0]
-end
-end
-subgraph s01 [s0..1]
-subgraph s01start [Start]
-direction LR
-s01sx[x = 2]
-s01si[i = 0]
-s01spc[pc = 0]
-end
-subgraph s01fin [End]
-direction LR
-s01fx[x = 4]
-s01fi[i = 1]
-s01fpc[pc = 0]
-end
-subgraph s01h ["h(h(s0)|h(s1))"]
-s0h["h(s0)"]
-s1h["h(s1)"]
-end
-end
-s0-->s0h
-s1-->s1h
-subgraph s23 [s2..3]
-subgraph s23start [Start]
-direction LR
-s23sx[x = 4]
-s23si[i = 1]
-s23spc[pc = 0]
-end
-subgraph s23fin [End]
-direction LR
-s23fx[x = 8]
-s23fi[i = 2]
-s23fpc[pc = 0]
-end
-subgraph s23h ["h(h(s2)|h(s3))"]
-s2h["h(s2)"]
-s3h["h(s3)"]
-end
-end
-s2-->s2h
-s3-->s3h
-subgraph s03 [s0..3]
-subgraph s03start [Start]
-direction LR
-s03sx[x = 2]
-s03si[i = 0]
-s03spc[pc = 0]
-end
-subgraph s03fin [End]
-direction LR
-s03fx[x = 8]
-s03fi[i = 2]
-s03fpc[pc = 0]
-end
-subgraph s03h ["h(h(s0..1)|h(s2..3))"]
-s01sh["h(s0..1)"]
-s23sh["h(s2..3)"]
-end
-end
-s01h-->s01sh
-s23h-->s23sh
+graph TB;
+    A(("0|0|2 -> 0|2|8 \n+ h(left|right)"))-->B(("0|0|2 -> 1|0|2 \n+ h(left|right)"))
+    A-->C(("0|1|4 -> 0|2|8 \n+ h(left|right)"));
+    B-->E(("0|0|2 -> 1|0|2"))
+    B-->F(("1|0|2 -> 0|1|4"))
+    C-->H(("0|1|4 -> 1|1|4"))
+    C-->I(("1|1|4 -> 0|2|8"))
 ```
+
+Here we see the first leaf go from state `[pc=0,i=0,x=2]` to `[pc=1,i=0,x=2]`
+and the last leaf go from state `[pc=1,i=1,x=4]` to `[pc=0,i=2,x=8]`. The
+internal nodes will commit to all state transitions of its subtree, and finally
+the root will commit to the whole transition from `[pc=0,i=0,x=2]` to
+`[pc=0,i=2,x=8]`.  
 
 (Note that for advanced programs with more state to keep track of, you would
 probably have the state be its own merkle tree the script would index into.
@@ -303,8 +206,8 @@ In step 12 Alice makes a mistake, she computes 64+64, but somehow ends
 up with 127. This leads to the trace commitment to change in a detacable way
 (output truncated for brevity):
 
-```
-$  cat alice_trace.txt | go run commitment/cmd/main.go
+```bash
+$  cat invalid_trace.txt | go run commitment/cmd/main.go
 ([][]string) (len=6 cap=8) {
  ([]string) (len=1 cap=1) {
   (string) (len=80) "||02|02|08|fc01|9d207d46d0dfa20b32bc980df4cc4a55aed8d9e3e055b90327f840cd13a62d9b"
@@ -316,8 +219,8 @@ root: dfdda533cad87bdd09bca15f5d9b94097c3f9403240fb08d06d1d241007935f5
 ```
 
 Contrast this to the trace commitment created from the correct trace:
-```
-$ cat bob_trace.txt | go run commitment/cmd/main.go
+```bash
+$ cat correct_trace.txt | go run commitment/cmd/main.go
 ([][]string) (len=6 cap=8) {
  ([]string) (len=1 cap=1) {
   (string) (len=80) "||02|02|08|0002|fc58a428e80e8c13377b1b6b677d338cc1289f5799d21025449a91bdf5c2a030"
@@ -385,11 +288,59 @@ Note that this is true also for Alice; if Bob stops responding according to the
 protocol, she can take the money after a timeout.
 
 ### The challenge protocol
-The full protocol will look the following
---- insert mermaid diagram ---
+The full protocol will look the following:
 
-After
-<inplement full protocol including back and forth challenge to test>
+```mermaid
+graph LR;
+    Alice-->B(contract\ntx);
+    Bob-->B;
+    B-->|x=2|E(question\ntx);
+    E~~~|Bob|E
+    E-->|"y=f(2)=508"|F(answer\ntx);
+    F~~~|Alice|F
+    F-->G(challenge\ntx);
+    G~~~|Bob|G
+    G-->|"x->z->y"|H(reveal\ntx);
+    H~~~|Alice|H
+    H-->|"x->z"|I(choose\ntx);
+    I~~~|Bob|I
+    I-->|"x->w->z"|J(reveal\ntx);
+    J~~~|Alice|J
+    J-..->K(choose\ntx);
+    K~~~|Bob|K
+    K-->|v|L(leaf\ntx);
+    L~~~|Alice|L
+    L-->M(Alice);
+```
+
+After funding the initial contract together, Alice an Bob will alternate
+between spending the output from the latest transaction. At each step Alice
+will reveal a node one level deeper in the commitment tree, and Bob will choose
+one of its branches to challenge.
+
+At the end we get down to a leaf in the tree, at which point Alice must show
+she can execute the state transition with one of the _transition verification
+(leaf) scripts_. If she can't, Bob will be able to spend the last output after
+the timeout has passed.
+
+### Demo
+By running the program in `cmd/scenario` you can play out this game using a
+trace for Alice. (Bob will challenge Alice whether he will win or not).
+
+For instance, by using the correct trace, we can see that Alice will win out in
+the end, and spend the money to her wallet:
+
+```bash
+$ cat correct_trace.txt | go run cmd/scenario/main.go
+<TODO: add better output after cleanup>
+```
+
+Running the same pogram with the modified trace we created above gives a different result:
+
+```bash
+$ cat invalid_trace.txt | go run cmd/scenario/main.go
+<TODO: add better output after cleanup>
+```
 
 
 
