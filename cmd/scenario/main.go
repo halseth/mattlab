@@ -61,10 +61,14 @@ func run() error {
 
 	// check connection to running node.
 	t := &testing.T{}
-	miner := btcd.NewMiner(context.Background(), t)
+	minerCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	miner := btcd.NewMiner(minerCtx, t)
 	if err := miner.SetUp(false, 50); err != nil {
 		return err
 	}
+	defer miner.TearDown()
 
 	// Activate segwit and taproot.
 	_ = miner.GenerateBlocks(450)
