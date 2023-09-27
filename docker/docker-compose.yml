@@ -19,7 +19,6 @@ services:
     image: ruimarinho/bitcoin-core:24.0.1
     command:
       -txindex
-      -debug
       -regtest
       -rpcallowip=0.0.0.0/0
       -rpcbind=localhost:18443
@@ -36,3 +35,47 @@ services:
       retries: 100
       start_period: 2s
       timeout: 2s
+  web:
+    environment:
+      FRONTEND_HTTP_PORT: "8080"
+      BACKEND_MAINNET_HTTP_HOST: "api"
+    image: frontend-6076eeed4
+    user: "1000:1000"
+    restart: on-failure
+    stop_grace_period: 1m
+    command: "./wait-for db:3306 --timeout=720 -- nginx -g 'daemon off;'"
+    ports:
+      - 80:8080
+  api:
+    environment:
+      #MEMPOOL_NETWORK: "regtest"
+      MEMPOOL_BACKEND: "none"
+        #MEMPOOL_BACKEND: "electrum"
+        #ELECTRUM_HOST: "host.docker.internal"
+        #ELECTRUM_PORT: "60401"
+       #ELECTRUM_TLS_ENABLED: "false"
+      CORE_RPC_HOST: "bitcoind"
+      CORE_RPC_PORT: "18443"
+      CORE_RPC_USERNAME: "mempool"
+      CORE_RPC_PASSWORD: "mempool"
+      DATABASE_ENABLED: "true"
+      DATABASE_HOST: "db"
+      DATABASE_DATABASE: "mempool"
+      DATABASE_USERNAME: "mempool"
+      DATABASE_PASSWORD: "mempool"
+      STATISTICS_ENABLED: "false"
+    image: backend-6076eeed4
+    user: "1000:1000"
+    restart: on-failure
+    stop_grace_period: 1m
+    command: "./wait-for-it.sh db:3306 --timeout=720 --strict -- ./start.sh"
+  db:
+    environment:
+      MYSQL_DATABASE: "mempool"
+      MYSQL_USER: "mempool"
+      MYSQL_PASSWORD: "mempool"
+      MYSQL_ROOT_PASSWORD: "admin"
+    image: mariadb:10.5.8
+      #user: "1000:1000"
+    restart: on-failure
+    stop_grace_period: 1m
