@@ -7,10 +7,16 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"testing"
+	"time"
 
 	"github.com/btcsuite/btcd/btcec/v2"
 	"github.com/btcsuite/btcd/btcec/v2/schnorr"
+	"github.com/btcsuite/btcd/btcjson"
+	"github.com/btcsuite/btcd/btcutil"
+	"github.com/btcsuite/btcd/chaincfg"
+	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/btcsuite/btcd/wire"
 	"github.com/davecgh/go-spew/spew"
@@ -21,7 +27,9 @@ import (
 	"github.com/halseth/mattlab/tracer/trace"
 )
 
-const value = 10_000_000_000
+// 100 BTC contract value will make btcd mine the transaction even it is zero fee
+const contractValue = 10_000_000_000
+
 const startX uint8 = 0x02
 const totalLevels = 5
 
@@ -58,6 +66,30 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	fmt.Println("read")
+
+	// Connect to local regtest bitcoind.
+	connCfg := &rpcclient.ConnConfig{
+		Host:         "localhost:18443",
+		User:         "mempool",
+		Pass:         "mempool",
+		HTTPPostMode: true,
+		DisableTLS:   true,
+	}
+
+	client, err := rpcclient.New(connCfg, nil)
+	if err != nil {
+		log.Fatalf("Failed to create client: %v", err)
+	}
+	defer client.Shutdown()
+
+	// Fetch the current block count.
+	blockCount, err := client.GetBlockCount()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("bitcoind blockCount", blockCount)
 
 	// check connection to running node.
 	t := &testing.T{}
@@ -70,26 +102,99 @@ func run() error {
 	}
 	defer miner.TearDown()
 
-	// Activate segwit and taproot.
-	_ = miner.GenerateBlocks(450)
+	// Used to wait for btcd and bitcoind to be in sync.
+	waitForHeight := func(h int32) (int32, error) {
+		fmt.Println("waiting for height", h)
+		for {
+			best, height := miner.GetBestBlock()
+			fmt.Println("btcd best block", best, "height", height)
+
+			blockCount, err := client.GetBlockCount()
+			if err != nil {
+				return 0, err
+			}
+
+			fmt.Println("bitcoind best height", blockCount)
+
+			if height >= h && height == int32(blockCount) {
+				return height, nil
+			}
+
+			<-time.After(100 * time.Millisecond)
+		}
+	}
+
+	// mine blocks using the active miner.
+	mineBlocks := func(num int32, waitForSync bool) error {
+		_, best := miner.GetBestBlock()
+
+		fmt.Println("mining", num, "blocks")
+		_ = miner.GenerateBlocks(uint32(num))
+
+		if waitForSync {
+			_, err = waitForHeight(best + num)
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	// Mine a few blocks.
+	_, currentHeight := miner.GetBestBlock()
+	err = mineBlocks(10, false)
+
+	// Connect btcd miner to local bitcoind
+	temp := "temp"
+	err = miner.Client.Node(
+		btcjson.NConnect, "127.0.0.1:18445", &temp,
+	)
+	if err != nil {
+		return err
+	}
+
+	// Wait for bitcoind to catch up.
+	currentHeight, err = waitForHeight(currentHeight + 10)
+	if err != nil {
+		return err
+	}
+
+	balance := miner.ConfirmedBalance()
+	fmt.Println("miner starting balance", balance)
+
+	// Activate segwit and taproot, fenerate coins for coin selection.
+	const numMineBlocks = 450
+	err = mineBlocks(numMineBlocks, true)
+	if err != nil {
+		return err
+	}
+
 	_ = aliceKey
 	_ = bobKey
+
+	balance = miner.ConfirmedBalance()
+	fmt.Println("miner balance after block mining", balance)
 
 	// Create the contract output. This will usually be an output the
 	// contract parties both fund with their stake. At this point they also
 	// agree on the maximum number of steps the computation can take. In
 	// this example we are using at most 2^5 == 32 steps.
-	contract, outputSpender, err := contractOutput(totalLevels)
+	contract, outputSpender, contractAddr, err := contractOutput(totalLevels)
 	if err != nil {
 		return err
 	}
+
+	amt := btcutil.Amount(contractValue)
+	fmt.Println("sending", amt, "to contract address", contractAddr)
 
 	txid, err := miner.SendOutput(contract, 100)
 	if err != nil {
 		return err
 	}
+
 	fmt.Println(txid)
-	_ = miner.GenerateBlocks(1)
+	_ = mineBlocks(1, true)
 
 	// TODO: Bob should do his own trace
 	x := []byte{startX}
@@ -109,7 +214,7 @@ func run() error {
 		return err
 	}
 	fmt.Println(txid)
-	_ = miner.GenerateBlocks(1)
+	_ = mineBlocks(1, true)
 
 	// Bob generates his own trace.
 	bobTrace, err := generateTrace(tx)
@@ -143,7 +248,7 @@ func run() error {
 		return err
 	}
 	fmt.Println(txid)
-	_ = miner.GenerateBlocks(1)
+	_ = mineBlocks(1, true)
 
 	challengeTx, outputSpender, err := postChallenge(answerTx, wire.OutPoint{
 		Hash:  *txid,
@@ -159,7 +264,7 @@ func run() error {
 		return err
 	}
 	fmt.Println(txid)
-	_ = miner.GenerateBlocks(1)
+	_ = mineBlocks(1, true)
 
 	// Until level 1, since level 0 is leaf
 	for level := totalLevels; level >= 1; level-- {
@@ -182,7 +287,7 @@ func run() error {
 			return err
 		}
 		fmt.Println(txid)
-		_ = miner.GenerateBlocks(1)
+		_ = mineBlocks(1, true)
 
 		var chooseTx *wire.MsgTx
 
@@ -204,7 +309,7 @@ func run() error {
 			return err
 		}
 		fmt.Println(txid)
-		_ = miner.GenerateBlocks(1)
+		_ = mineBlocks(1, true)
 	}
 
 	// Alice cleaim leaf
@@ -226,7 +331,7 @@ func run() error {
 		return err
 	}
 	fmt.Println(txid)
-	_ = miner.GenerateBlocks(1)
+	_ = mineBlocks(1, true)
 
 	return nil
 }
@@ -270,13 +375,13 @@ func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
 
 	outputKey := randKey.PubKey()
 
-	pkScript, taptree, err := toPkScriptTree(outputKey, nil)
+	pkScript, taptree, _, err := toPkScriptTree(outputKey, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	prevOut := &wire.TxOut{
-		Value:    value,
+		Value:    contractValue,
 		PkScript: pkScript,
 	}
 	tx.AddTxOut(prevOut)
@@ -405,13 +510,13 @@ func postChoose(revealTx *wire.MsgTx, level, startIndex, endIndex int, tr [][][]
 		numsKey, commit[:],
 	)
 
-	pkScript, taptree, err := toPkScriptTree(tweaked, outputScriptTree)
+	pkScript, taptree, _, err := toPkScriptTree(tweaked, outputScriptTree)
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
 
 	prevOut := &wire.TxOut{
-		Value:    value,
+		Value:    contractValue,
 		PkScript: pkScript,
 	}
 	tx.AddTxOut(prevOut)
@@ -526,13 +631,13 @@ func postReveal(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoin
 		numsKey, commit[:],
 	)
 
-	pkScript, taptree, err := toPkScriptTree(tweaked, outputScriptTree)
+	pkScript, taptree, _, err := toPkScriptTree(tweaked, outputScriptTree)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	prevOut := &wire.TxOut{
-		Value:    value,
+		Value:    contractValue,
 		PkScript: pkScript,
 	}
 	tx.AddTxOut(prevOut)
@@ -605,13 +710,13 @@ func postChallenge(answerTx *wire.MsgTx, out wire.OutPoint, spender *OutputSpend
 		numsKey, commit[:],
 	)
 
-	pkScript, taptree, err := toPkScriptTree(tweaked, outputScriptTree)
+	pkScript, taptree, _, err := toPkScriptTree(tweaked, outputScriptTree)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	prevOut := &wire.TxOut{
-		Value:    value,
+		Value:    contractValue,
 		PkScript: pkScript,
 	}
 	tx.AddTxOut(prevOut)
@@ -739,13 +844,13 @@ func postAnswer(startIndex, endIndex int, tr [][][]byte, out wire.OutPoint,
 		numsKey, commit[:],
 	)
 
-	pkScript, taptree, err := toPkScriptTree(tweaked, outputScriptTree)
+	pkScript, taptree, _, err := toPkScriptTree(tweaked, outputScriptTree)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	prevOut := &wire.TxOut{
-		Value:    value,
+		Value:    contractValue,
 		PkScript: pkScript,
 	}
 	tx.AddTxOut(prevOut)
@@ -801,13 +906,13 @@ func postQuestion(x []byte, out wire.OutPoint, spender *OutputSpender) (
 	)
 
 	fmt.Printf("outputcommit: %x\n", hOutputCommit[:])
-	pkScript, taptree, err := toPkScriptTree(tweaked, outputScriptTree)
+	pkScript, taptree, _, err := toPkScriptTree(tweaked, outputScriptTree)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	prevOut := &wire.TxOut{
-		Value:    value,
+		Value:    contractValue,
 		PkScript: pkScript,
 	}
 
@@ -890,7 +995,7 @@ func (o *OutputSpender) CtrlBlock() (
 }
 
 func toPkScriptTree(pubKey *btcec.PublicKey, scriptTree *txscript.IndexedTapScriptTree) (
-	[]byte, *txscript.IndexedTapScriptTree, error) {
+	[]byte, *txscript.IndexedTapScriptTree, btcutil.Address, error) {
 
 	var taproot [32]byte
 	if scriptTree != nil {
@@ -903,23 +1008,31 @@ func toPkScriptTree(pubKey *btcec.PublicKey, scriptTree *txscript.IndexedTapScri
 	fmt.Printf("taproot  %x\n", taproot[:])
 	fmt.Printf("tapkey %x\n", schnorr.SerializePubKey(tapKey))
 
-	pk, err := txscript.PayToTaprootScript(tapKey)
+	net := &chaincfg.RegressionNetParams
+	address, err := btcutil.NewAddressTaproot(
+		schnorr.SerializePubKey(tapKey), net,
+	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return pk, scriptTree, nil
+	pk, err := txscript.PayToTaprootScript(tapKey)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return pk, scriptTree, address, nil
 }
 
 // contractOutput creates the initial contract output.
-func contractOutput(numLevels int) (*wire.TxOut, *OutputSpender, error) {
+func contractOutput(numLevels int) (*wire.TxOut, *OutputSpender, btcutil.Address, error) {
 
 	// The contract output must be spent by Bob posting the question...
 	q, _, err := scripts.GenerateQuestion(
 		aliceKey.PubKey(), bobKey.PubKey(), numLevels, scripts.ScriptSteps,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	var tapLeaves []txscript.TapLeaf
@@ -929,20 +1042,20 @@ func contractOutput(numLevels int) (*wire.TxOut, *OutputSpender, error) {
 	// .. or by Alice after a timeout.
 	timeout, err := scripts.GenerateTimeout(aliceKey.PubKey())
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	tt := txscript.NewBaseTapLeaf(timeout)
 	tapLeaves = append(tapLeaves, tt)
 	outputScriptTree := txscript.AssembleTaprootScriptTree(tapLeaves...)
 
-	pkScript, tapScriptTree, err := toPkScriptTree(numsKey, outputScriptTree)
+	pkScript, tapScriptTree, addr, err := toPkScriptTree(numsKey, outputScriptTree)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	prevOut := &wire.TxOut{
-		Value:    10_000_000_000,
+		Value:    contractValue,
 		PkScript: pkScript,
 	}
 
@@ -950,5 +1063,5 @@ func contractOutput(numLevels int) (*wire.TxOut, *OutputSpender, error) {
 		prevOut:     prevOut,
 		internalKey: numsKey,
 		taptree:     tapScriptTree,
-	}, nil
+	}, addr, nil
 }
