@@ -376,6 +376,10 @@ func (h *HarnessMiner) SendTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) 
 	return h.Harness.Client.SendRawTransaction(tx, false)
 }
 
+func (h *HarnessMiner) ConfirmedBalance() btcutil.Amount {
+	return h.Harness.ConfirmedBalance()
+}
+
 // SendOutput creates, signs, and finally broadcasts a transaction spending
 // the harness' available mature coinbase outputs to create the new output.
 func (h *HarnessMiner) SendOutput(newOutput *wire.TxOut,
