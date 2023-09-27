@@ -76,7 +76,6 @@ func GenerateQuestion(aliceKey, bobKey *btcec.PublicKey, totalLevels int,
 		return nil, nil, err
 	}
 
-	//	fmt.Println(scr)
 	scriptBytes := []byte(scr)
 
 	s, err := file.ParseScript(scriptBytes)
@@ -184,7 +183,6 @@ func GenerateAnswer(aliceKey, bobKey *btcec.PublicKey, totalLevels int,
 	if err != nil {
 		return nil, nil, err
 	}
-	fmt.Println(scr)
 	scriptBytes := []byte(scr)
 
 	s, err := file.ParseScript(scriptBytes)
