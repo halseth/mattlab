@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"testing"
 	"time"
 
@@ -66,13 +67,23 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("read")
+	fmt.Println("read", len(aliceTrace))
+
+	bitcoindHost := os.Getenv("BITCOIND_HOST")
+	bitcoindPort := os.Getenv("BITCOIND_RPC_PORT")
+	bitcoindUser := os.Getenv("BITCOIND_RPC_USER")
+	bitcoindPw := os.Getenv("BITCOIND_RPC_PW")
+	fmt.Printf("connecting bitcoind at %s:%s@%s:%s\n",
+		bitcoindUser, bitcoindPw, bitcoindHost,
+		bitcoindPort,
+	)
 
 	// Connect to local regtest bitcoind.
 	connCfg := &rpcclient.ConnConfig{
-		Host:         "localhost:18443",
-		User:         "mempool",
-		Pass:         "mempool",
+		Host: fmt.Sprintf("%s:%s",
+			bitcoindHost, bitcoindPort),
+		User:         bitcoindUser,
+		Pass:         bitcoindPw,
 		HTTPPostMode: true,
 		DisableTLS:   true,
 	}
@@ -146,9 +157,11 @@ func run() error {
 	err = mineBlocks(10, false)
 
 	// Connect btcd miner to local bitcoind
+	bitcoindP2p := os.Getenv("BITCOIND_P2P_PORT")
 	temp := "temp"
 	err = miner.Client.Node(
-		btcjson.NConnect, "127.0.0.1:18445", &temp,
+		btcjson.NConnect, fmt.Sprintf("%s:%s",
+			bitcoindHost, bitcoindP2p), &temp,
 	)
 	if err != nil {
 		return err
