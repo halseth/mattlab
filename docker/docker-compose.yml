@@ -1,0 +1,38 @@
+version: "3.7"
+
+services:
+  app:
+    depends_on:
+      bitcoind:
+        condition: service_healthy
+    environment:
+      BITCOIND_HOST: "bitcoind"
+      BITCOIND_RPC_USER: "mempool"
+      BITCOIND_RPC_PW: "mempool"
+      BITCOIND_RPC_PORT: "18443"
+      BITCOIND_P2P_PORT: "18444"
+    image: matt-scenario
+      #user: "1000:1000"
+      #restart: on-failure
+    stop_grace_period: 10s
+  bitcoind:
+    image: ruimarinho/bitcoin-core:24.0.1
+    command:
+      -txindex
+      -debug
+      -regtest
+      -rpcallowip=0.0.0.0/0
+      -rpcbind=localhost:18443
+      -rpcbind=bitcoind:18443
+      -rpcuser=mempool
+      -rpcpassword=mempool
+      -server
+      -rest
+    ports:
+      - 18443:18443
+    healthcheck:
+      test: curl --fail "http://foo@localhost:18443/rest/chaininfo.json" || exit 1
+      interval: 2s
+      retries: 100
+      start_period: 2s
+      timeout: 2s
