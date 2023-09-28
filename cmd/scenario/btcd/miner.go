@@ -19,6 +19,7 @@ import (
 	"github.com/btcsuite/btcd/integration/rpctest"
 	"github.com/btcsuite/btcd/rpcclient"
 	"github.com/btcsuite/btcd/wire"
+	"github.com/davecgh/go-spew/spew"
 	"github.com/lightningnetwork/lnd/lntest/node"
 	"github.com/lightningnetwork/lnd/lntest/wait"
 	"github.com/stretchr/testify/require"
@@ -202,7 +203,7 @@ func (h *HarnessMiner) MineBlocks(num uint32) []*wire.MsgBlock {
 // AssertNumTxsInMempool polls until finding the desired number of transactions
 // in the provided miner's mempool. It will asserrt if this number is not met
 // after the given timeout.
-func (h *HarnessMiner) AssertNumTxsInMempool(n int) []*chainhash.Hash {
+func (h *HarnessMiner) AssertNumTxsInMempool(n int) ([]*chainhash.Hash, error) {
 	var (
 		mem []*chainhash.Hash
 		err error
@@ -219,14 +220,16 @@ func (h *HarnessMiner) AssertNumTxsInMempool(n int) []*chainhash.Hash {
 		return fmt.Errorf("want %v, got %v in mempool: %v",
 			n, len(mem), mem)
 	}, wait.MinerMempoolTimeout)
-	require.NoError(h, err, "assert tx in mempool timeout")
+	if err != nil {
+		return nil, fmt.Errorf("assert tx in mempool timeout: %w", err)
+	}
 
-	return mem
+	return mem, nil
 }
 
 // AssertTxInBlock asserts that a given txid can be found in the passed block.
 func (h *HarnessMiner) AssertTxInBlock(block *wire.MsgBlock,
-	txid *chainhash.Hash) {
+	txid *chainhash.Hash) error {
 
 	blockTxes := make([]chainhash.Hash, 0)
 
@@ -235,11 +238,11 @@ func (h *HarnessMiner) AssertTxInBlock(block *wire.MsgBlock,
 		blockTxes = append(blockTxes, sha)
 
 		if bytes.Equal(txid[:], sha[:]) {
-			return
+			return nil
 		}
 	}
 
-	require.Failf(h, "tx was not included in block", "tx:%v, block has:%v",
+	return fmt.Errorf("tx was not included in block", "tx:%v, block has:%v",
 		txid, blockTxes)
 }
 
@@ -248,11 +251,15 @@ func (h *HarnessMiner) AssertTxInBlock(block *wire.MsgBlock,
 // transactions (excluding the coinbase) we expect to be included in the first
 // mined block.
 func (h *HarnessMiner) MineBlocksAndAssertNumTxes(num uint32,
-	numTxs int) []*wire.MsgBlock {
+	numTxs int) ([]*wire.MsgBlock, error) {
 
 	// If we expect transactions to be included in the blocks we'll mine,
 	// we wait here until they are seen in the miner's mempool.
-	txids := h.AssertNumTxsInMempool(numTxs)
+	txids, err := h.AssertNumTxsInMempool(numTxs)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Println("txs in mempool:", spew.Sdump(txids))
 
 	// Mine blocks.
 	blocks := h.MineBlocks(num)
@@ -260,10 +267,13 @@ func (h *HarnessMiner) MineBlocksAndAssertNumTxes(num uint32,
 	// Finally, assert that all the transactions were included in the first
 	// block.
 	for _, txid := range txids {
-		h.AssertTxInBlock(blocks[0], txid)
+		err := h.AssertTxInBlock(blocks[0], txid)
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	return blocks
+	return blocks, nil
 }
 
 // GetRawTransaction makes a RPC call to the miner's GetRawTransaction and
@@ -350,25 +360,17 @@ func (h *HarnessMiner) AssertTxNotInMempool(txid chainhash.Hash) *wire.MsgTx {
 // SendOutputsWithoutChange uses the miner to send the given outputs using the
 // specified fee rate and returns the txid.
 func (h *HarnessMiner) SendOutputsWithoutChange(outputs []*wire.TxOut,
-	feeRate btcutil.Amount) *chainhash.Hash {
+	feeRate btcutil.Amount) (*chainhash.Hash, error) {
 
-	txid, err := h.Harness.SendOutputsWithoutChange(
-		outputs, feeRate,
-	)
-	require.NoErrorf(h, err, "failed to send output")
-
-	return txid
+	return h.Harness.SendOutputsWithoutChange(outputs, feeRate)
 }
 
 // CreateTransaction uses the miner to create a transaction using the given
 // outputs using the specified fee rate and returns the transaction.
 func (h *HarnessMiner) CreateTransaction(outputs []*wire.TxOut,
-	feeRate btcutil.Amount) *wire.MsgTx {
+	feeRate btcutil.Amount) (*wire.MsgTx, error) {
 
-	tx, err := h.Harness.CreateTransaction(outputs, feeRate, false)
-	require.NoErrorf(h, err, "failed to create transaction")
-
-	return tx
+	return h.Harness.CreateTransaction(outputs, feeRate, true)
 }
 
 func (h *HarnessMiner) SendTransaction(tx *wire.MsgTx) (*chainhash.Hash, error) {
@@ -460,8 +462,11 @@ func (h *HarnessMiner) AssertOutpointInMempool(op wire.OutPoint) *wire.MsgTx {
 
 // GetNumTxsFromMempool polls until finding the desired number of transactions
 // in the miner's mempool and returns the full transactions to the caller.
-func (h *HarnessMiner) GetNumTxsFromMempool(n int) []*wire.MsgTx {
-	txids := h.AssertNumTxsInMempool(n)
+func (h *HarnessMiner) GetNumTxsFromMempool(n int) ([]*wire.MsgTx, error) {
+	txids, err := h.AssertNumTxsInMempool(n)
+	if err != nil {
+		return nil, err
+	}
 
 	var txes []*wire.MsgTx
 	for _, txid := range txids {
@@ -469,7 +474,7 @@ func (h *HarnessMiner) GetNumTxsFromMempool(n int) []*wire.MsgTx {
 		txes = append(txes, tx.MsgTx())
 	}
 
-	return txes
+	return txes, nil
 }
 
 // NewMinerAddress creates a new address for the miner and asserts.
