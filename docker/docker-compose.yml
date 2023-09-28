@@ -64,10 +64,10 @@ services:
       DATABASE_USERNAME: "mempool"
       DATABASE_PASSWORD: "mempool"
       STATISTICS_ENABLED: "false"
-    image: mempool/backend:latest
+    image: halseth/mempool:backend-op_ccv
     user: "1000:1000"
     restart: on-failure
-    stop_grace_period: 1m
+    stop_grace_period: 2s
     command: "./wait-for-it.sh db:3306 --timeout=720 --strict -- ./start.sh"
   db:
     environment:
