@@ -15,7 +15,6 @@ var (
 
 func Print() {
 	fmt.Println(spew.Sdump(printTree))
-	fmt.Printf("root: %x\n", commitmentTree[0][0])
 }
 
 // SubCommitment(from, to) returns
