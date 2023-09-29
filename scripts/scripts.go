@@ -689,7 +689,7 @@ func GenerateLeaf(aliceKey *btcec.PublicKey, pc uint16,
 
 const timeoutScript = `
 # ====================== TIMEOUT SCRIPT =======================
-80 OP_CHECKSEQUENCEVERIFY OP_DROP # require 128 blocks to have passed.
+64 OP_CHECKSEQUENCEVERIFY OP_DROP # require 100 blocks to have passed.
 
 # If that checks out, the pubkey is allowed to take the money.
 %x

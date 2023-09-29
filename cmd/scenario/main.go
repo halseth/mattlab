@@ -475,11 +475,35 @@ func run() error {
 	}
 	fmt.Println("leaf tx: ", spew.Sdump(leafTx))
 	//txid, err = miner.SendTransaction(leafTx)
-	txid, err = sendAndMine(leafTx)
+	leafTxid, err := sendAndMine(leafTx)
+
+	// If we failed to mine the leaf transaction it could mean Alice was
+	// using an invalid case. So we'll attempt to mine more blocks and let
+	// Bob take the money.
 	if err != nil {
-		return err
+		fmt.Println("error posting leaf:", err)
+
+		_ = mineBlocks(150, true)
+
+		timeoutTx, _, err := postTimeout(
+			wire.OutPoint{
+				Hash:  *txid,
+				Index: 0,
+			}, outputSpender)
+
+		if err != nil {
+			return err
+		}
+
+		fmt.Println("timeout tx: ", spew.Sdump(timeoutTx))
+		txid, err = sendAndMine(timeoutTx)
+		if err != nil {
+			return err
+		}
+		fmt.Println("timeout:", txid)
+	} else {
+		fmt.Println("leaf:", leafTxid)
 	}
-	fmt.Println("leaf:", txid)
 	//_ = mineBlocks(1, true)
 
 	mempool := miner.GetRawMempool()
@@ -498,6 +522,66 @@ func generateTrace(questionTx *wire.MsgTx) ([][][]byte, error) {
 	startStack := fmt.Sprintf("%02x <> <>", x)
 	fmt.Println("start stack:", startStack)
 	return trace.GetTrace(scripts.ScriptSteps, startStack)
+}
+
+func postTimeout(out wire.OutPoint, spender *OutputSpender) (
+	*wire.MsgTx, *OutputSpender, error) {
+
+	tx := wire.NewMsgTx(2)
+	tx.AddTxIn(&wire.TxIn{
+		PreviousOutPoint: out,
+		Sequence:         100,
+	})
+
+	// Send to own address
+	randKey, err := btcec.NewPrivateKey()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	outputKey := randKey.PubKey()
+
+	pkScript, taptree, _, err := toPkScriptTree(outputKey, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	prevOut := &wire.TxOut{
+		Value:    contractValue,
+		PkScript: pkScript,
+	}
+	tx.AddTxOut(prevOut)
+
+	feeOp, err := addTxFeeInput(tx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	err = signTxFee(tx, feeOp)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	spender.scriptIndex = 2
+	sig, err := spender.Sign(tx, bobKey)
+	if err != nil {
+		return nil, nil, err
+	}
+	witness := wire.TxWitness{}
+	witness = append(witness, sig)
+
+	ctrlBlock, err := spender.CtrlBlock()
+	if err != nil {
+		return nil, nil, err
+	}
+	witness = append(witness, ctrlBlock...)
+	tx.TxIn[0].Witness = witness
+
+	return tx, &OutputSpender{
+		prevOut:     prevOut,
+		internalKey: outputKey,
+		taptree:     taptree,
+	}, nil
 }
 
 func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
