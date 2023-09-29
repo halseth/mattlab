@@ -562,7 +562,7 @@ func postTimeout(out wire.OutPoint, spender *OutputSpender) (
 		return nil, nil, err
 	}
 
-	spender.scriptIndex = 2
+	spender.scriptIndex = len(scripts.ScriptSteps)
 	sig, err := spender.Sign(tx, bobKey)
 	if err != nil {
 		return nil, nil, err

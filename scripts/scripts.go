@@ -13,6 +13,7 @@ import (
 var ScriptSteps = []string{
 	"OP_DROP OP_DUP OP_8 OP_LESSTHAN OP_IF OP_1 OP_ELSE OP_2 OP_ENDIF",
 	"OP_DROP OP_1ADD OP_SWAP OP_DUP OP_ADD OP_SWAP OP_0",
+	"OP_NOP",
 }
 
 // bob spends this script in the question transaction

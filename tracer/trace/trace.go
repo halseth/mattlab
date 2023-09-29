@@ -14,6 +14,11 @@ const maxSteps = 80
 // stack. It assumes that the program counter is the top stack element and that
 // it can be used to index into the scriptSteps slice.
 func GetTrace(scriptSteps []string, startStackStr string) ([][][]byte, error) {
+	numSteps := len(scriptSteps)
+	if scriptSteps[numSteps-1] != "OP_NOP" {
+		return nil, fmt.Errorf("last script step must be OP_NOP")
+	}
+
 	// Empty sign func, we don't support signatures.
 	signFunc := func(keyID string) ([]byte, error) {
 		return nil, fmt.Errorf("signatures not supported")
@@ -41,7 +46,7 @@ func GetTrace(scriptSteps []string, startStackStr string) ([][][]byte, error) {
 
 	bound := 0
 	pc := GetProgramCounter(currentStack)
-	for pc < uint8(len(scriptSteps)) {
+	for pc < uint8(numSteps)-1 {
 		// Execute script step at current program counter.
 		pkScript, err := script.Parse(scriptSteps[pc])
 		if err != nil {
