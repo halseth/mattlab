@@ -3,7 +3,6 @@ package trace
 import (
 	"fmt"
 
-	"github.com/davecgh/go-spew/spew"
 	"github.com/halseth/mattlab/tracer/execute"
 	"github.com/halseth/tapsim/script"
 )
@@ -56,7 +55,7 @@ func GetTrace(scriptSteps []string, startStackStr string) ([][][]byte, error) {
 		// We ignore the error, as we don't need this to be valid as a
 		// standalone Bitcoin script
 		currentStack, _ = execute.ExecuteStep(pkScript, currentStack)
-		fmt.Println("stack", spew.Sdump(currentStack))
+		//fmt.Println("stack", spew.Sdump(currentStack))
 
 		trace = append(trace, currentStack)
 		pc = GetProgramCounter(currentStack)

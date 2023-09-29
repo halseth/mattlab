@@ -44,15 +44,15 @@ var (
 	aliceKey, _      = btcec.PrivKeyFromBytes(aliceKeyBytes)
 	bobKeyBytes, _   = hex.DecodeString("98e40b648bd82e45d98db669328f799bd7c610dd500a9b02c59d54c222ac2b75")
 	bobKey, _        = btcec.PrivKeyFromBytes(bobKeyBytes)
+
+	feeUtxos       = make(map[wire.OutPoint]*feeOut)
+	prevOutFetcher = txscript.NewMultiPrevOutFetcher(nil)
 )
 
 type feeOut struct {
 	privKey *btcec.PrivateKey
 	prevOut *wire.TxOut
 }
-
-var feeUtxos = make(map[wire.OutPoint]*feeOut)
-var prevOutFetcher = txscript.NewMultiPrevOutFetcher(nil)
 
 func addTxFeeInput(tx *wire.MsgTx) (*wire.OutPoint, error) {
 	for op := range feeUtxos {
@@ -88,7 +88,6 @@ func signTxFee(tx *wire.MsgTx, op *wire.OutPoint) error {
 }
 
 func main() {
-
 	// Create a contract UTXO to the question script.
 	// Bob spends this UTXO, posting his question x in the process.
 	// Alice spends this posting her answer.
@@ -115,7 +114,8 @@ func run() error {
 		return fmt.Errorf("no trace given")
 	}
 
-	fmt.Println("read trace of length", len(aliceTrace))
+	fmt.Println("read trace:")
+	print.PrintTrace(aliceTrace)
 
 	bitcoindHost := os.Getenv("BITCOIND_HOST")
 	bitcoindPort := os.Getenv("BITCOIND_RPC_PORT")
@@ -150,7 +150,7 @@ func run() error {
 
 	fmt.Println("bitcoind blockCount", blockCount)
 
-	// check connection to running node.
+	// Set up btcd miner.
 	t := &testing.T{}
 	minerCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -200,6 +200,7 @@ func run() error {
 		return nil
 	}
 
+	// send transaction and check that it is mined in the next block.
 	sendAndMine := func(tx *wire.MsgTx) (*chainhash.Hash, error) {
 		_, best := miner.GetBestBlock()
 
@@ -208,7 +209,6 @@ func run() error {
 		if err != nil {
 			return nil, err
 		}
-		fmt.Println("send tx:", txid)
 
 		fmt.Println("mining 1 block")
 		_, err = miner.MineBlocksAndAssertNumTxes(1, 1)
@@ -325,7 +325,6 @@ func run() error {
 		return err
 	}
 
-	//txid, err := miner.SendOutput(contract, 100)
 	contractTx, err := miner.CreateTransaction([]*wire.TxOut{contract}, 100)
 	if err != nil {
 		return err
@@ -337,7 +336,6 @@ func run() error {
 	}
 
 	fmt.Println("contract:", txid)
-	//_ = mineBlocks(1, true)
 
 	// TODO: Bob should do his own trace
 	x := []byte{startX}
@@ -352,32 +350,28 @@ func run() error {
 		return err
 	}
 	fmt.Println("question tx:", spew.Sdump(questionTx))
-	//txid, err = miner.SendTransaction(tx)
+
 	txid, err = sendAndMine(questionTx)
 	if err != nil {
 		return err
 	}
 	fmt.Println("question:", txid)
-	//_ = mineBlocks(1, true)
 
-	// Bob generates his own trace.
+	// Bob generates his own, correct trace.
 	bobTrace, err := generateTrace(questionTx)
 	if err != nil {
 		return err
 	}
-	_ = bobTrace
 
-	tr := aliceTrace
-
-	fmt.Println("got trace")
-	print.PrintTrace(tr)
+	fmt.Println("Bob got trace:")
+	print.PrintTrace(bobTrace)
 
 	traceStartIndex := 0
-	traceEndIndex := len(tr) - 1
+	traceEndIndex := len(aliceTrace) - 1
 
 	fmt.Println("posting answer")
 	answerTx, outputSpender, err := postAnswer(
-		traceStartIndex, traceEndIndex, tr,
+		traceStartIndex, traceEndIndex, aliceTrace,
 		wire.OutPoint{
 			Hash:  *txid,
 			Index: 0,
@@ -387,13 +381,12 @@ func run() error {
 		return err
 	}
 	fmt.Println("answer tx: ", spew.Sdump(answerTx))
-	//txid, err = miner.SendTransaction(answerTx)
+
 	txid, err = sendAndMine(answerTx)
 	if err != nil {
 		return err
 	}
 	fmt.Println("answer:", txid)
-	//_ = mineBlocks(1, true)
 
 	challengeTx, outputSpender, err := postChallenge(answerTx, wire.OutPoint{
 		Hash:  *txid,
@@ -404,13 +397,12 @@ func run() error {
 		return err
 	}
 	fmt.Println("challenge tx: ", spew.Sdump(challengeTx))
-	//txid, err = miner.SendTransaction(challengeTx)
+
 	txid, err = sendAndMine(challengeTx)
 	if err != nil {
 		return err
 	}
 	fmt.Println("challenge:", txid)
-	//	_ = mineBlocks(1, true)
 
 	// Until level 1, since level 0 is leaf
 	for level := totalLevels; level >= 1; level-- {
@@ -418,7 +410,8 @@ func run() error {
 		var revealTx *wire.MsgTx
 		revealTx, outputSpender, err = postReveal(
 			level,
-			traceStartIndex, traceEndIndex, tr,
+			traceStartIndex, traceEndIndex,
+			aliceTrace,
 			wire.OutPoint{
 				Hash:  *txid,
 				Index: 0,
@@ -428,13 +421,12 @@ func run() error {
 			return err
 		}
 		fmt.Println("reveal tx: ", spew.Sdump(revealTx))
-		//txid, err = miner.SendTransaction(revealTx)
+
 		txid, err = sendAndMine(revealTx)
 		if err != nil {
 			return err
 		}
 		fmt.Println("reveal at level", level, txid)
-		//_ = mineBlocks(1, true)
 
 		var chooseTx *wire.MsgTx
 
@@ -451,20 +443,17 @@ func run() error {
 			return err
 		}
 		fmt.Println("choose tx: ", spew.Sdump(chooseTx))
-		//txid, err = miner.SendTransaction(chooseTx)
+
 		txid, err = sendAndMine(chooseTx)
 		if err != nil {
 			return err
 		}
 		fmt.Println("choose at level", level, txid)
-		//_ = mineBlocks(1, true)
 	}
 
 	// Alice cleaim leaf
-	// TODO: set script index to chosen leaf
-	//outputSpender.scriptIndex = 0
-	leafTx, _, err := postLeaf(
-		tr[traceStartIndex],
+	leafTx, _, aliceAddr, err := postLeaf(
+		aliceTrace[traceStartIndex],
 		wire.OutPoint{
 			Hash:  *txid,
 			Index: 0,
@@ -474,7 +463,7 @@ func run() error {
 		return err
 	}
 	fmt.Println("leaf tx: ", spew.Sdump(leafTx))
-	//txid, err = miner.SendTransaction(leafTx)
+
 	leafTxid, err := sendAndMine(leafTx)
 
 	// If we failed to mine the leaf transaction it could mean Alice was
@@ -485,7 +474,7 @@ func run() error {
 
 		_ = mineBlocks(150, true)
 
-		timeoutTx, _, err := postTimeout(
+		timeoutTx, _, bobAddr, err := postTimeout(
 			wire.OutPoint{
 				Hash:  *txid,
 				Index: 0,
@@ -501,13 +490,12 @@ func run() error {
 			return err
 		}
 		fmt.Println("timeout:", txid)
+		fmt.Println("Bob got the money at", bobAddr)
 	} else {
 		fmt.Println("leaf:", leafTxid)
-	}
-	//_ = mineBlocks(1, true)
 
-	mempool := miner.GetRawMempool()
-	fmt.Println("ending mempool:", spew.Sdump(mempool))
+		fmt.Println("Alice got the money at", aliceAddr)
+	}
 
 	return nil
 }
@@ -525,7 +513,7 @@ func generateTrace(questionTx *wire.MsgTx) ([][][]byte, error) {
 }
 
 func postTimeout(out wire.OutPoint, spender *OutputSpender) (
-	*wire.MsgTx, *OutputSpender, error) {
+	*wire.MsgTx, *OutputSpender, btcutil.Address, error) {
 
 	tx := wire.NewMsgTx(2)
 	tx.AddTxIn(&wire.TxIn{
@@ -536,14 +524,14 @@ func postTimeout(out wire.OutPoint, spender *OutputSpender) (
 	// Send to own address
 	randKey, err := btcec.NewPrivateKey()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	outputKey := randKey.PubKey()
 
-	pkScript, taptree, _, err := toPkScriptTree(outputKey, nil)
+	pkScript, taptree, addr, err := toPkScriptTree(outputKey, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	prevOut := &wire.TxOut{
@@ -554,25 +542,25 @@ func postTimeout(out wire.OutPoint, spender *OutputSpender) (
 
 	feeOp, err := addTxFeeInput(tx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	err = signTxFee(tx, feeOp)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	spender.scriptIndex = len(scripts.ScriptSteps)
 	sig, err := spender.Sign(tx, bobKey)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	witness := wire.TxWitness{}
 	witness = append(witness, sig)
 
 	ctrlBlock, err := spender.CtrlBlock()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	witness = append(witness, ctrlBlock...)
 	tx.TxIn[0].Witness = witness
@@ -581,11 +569,11 @@ func postTimeout(out wire.OutPoint, spender *OutputSpender) (
 		prevOut:     prevOut,
 		internalKey: outputKey,
 		taptree:     taptree,
-	}, nil
+	}, addr, nil
 }
 
 func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
-	*wire.MsgTx, *OutputSpender, error) {
+	*wire.MsgTx, *OutputSpender, btcutil.Address, error) {
 
 	//	pc := trace.GetProgramCounter(startState)
 	//
@@ -606,14 +594,14 @@ func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
 	// Send to own address
 	randKey, err := btcec.NewPrivateKey()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	outputKey := randKey.PubKey()
 
-	pkScript, taptree, _, err := toPkScriptTree(outputKey, nil)
+	pkScript, taptree, addr, err := toPkScriptTree(outputKey, nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	prevOut := &wire.TxOut{
@@ -624,12 +612,12 @@ func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
 
 	feeOp, err := addTxFeeInput(tx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	err = signTxFee(tx, feeOp)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Use PC from start state to determine which leaf to use
@@ -642,7 +630,7 @@ func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
 
 	sig, err := spender.Sign(tx, aliceKey)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	witness := wire.TxWitness{}
 	witness = append(witness, sig)
@@ -650,7 +638,7 @@ func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
 
 	ctrlBlock, err := spender.CtrlBlock()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	witness = append(witness, ctrlBlock...)
 	tx.TxIn[0].Witness = witness
@@ -667,7 +655,7 @@ func postLeaf(startState [][]byte, out wire.OutPoint, spender *OutputSpender) (
 		prevOut:     prevOut,
 		internalKey: outputKey,
 		taptree:     taptree,
-	}, nil
+	}, addr, nil
 }
 
 func postChoose(revealTx *wire.MsgTx, level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoint, spender *OutputSpender) (
@@ -823,11 +811,6 @@ func catState(w io.Writer, state [][]byte) error {
 func postReveal(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoint, spender *OutputSpender) (
 	*wire.MsgTx, *OutputSpender, error) {
 
-	//	hCurrent, _, err := commitment.SubCommitment(startIndex, endIndex, tr, 0)
-	//	if err != nil {
-	//		return nil, nil, err
-	//	}
-
 	midIndex := startIndex + (endIndex-startIndex)/2
 	fmt.Println("start", startIndex, "mid", midIndex, "end", endIndex)
 	sub1, sub1Commit, _, err := commitment.SubCommitment(startIndex, midIndex, tr, 0)
@@ -843,24 +826,6 @@ func postReveal(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoin
 	startState := tr[startIndex]
 	midState := tr[midIndex]
 	endState := tr[endIndex]
-
-	//	sub1 := &bytes.Buffer{}
-	//	if err := catState(sub1, startState); err != nil {
-	//		return nil, nil, err
-	//	}
-	//	if err := catState(sub1, midState); err != nil {
-	//		return nil, nil, err
-	//	}
-	//	sub1.Write(sub1Commit)
-	//
-	//	sub2 := &bytes.Buffer{}
-	//	if err := catState(sub2, midState); err != nil {
-	//		return nil, nil, err
-	//	}
-	//	if err := catState(sub2, endState); err != nil {
-	//		return nil, nil, err
-	//	}
-	//	sub2.Write(sub2Commit)
 
 	tx := wire.NewMsgTx(2)
 	tx.AddTxIn(&wire.TxIn{
@@ -1041,7 +1006,7 @@ func postAnswer(startIndex, endIndex int, tr [][][]byte, out wire.OutPoint,
 		return nil, nil, err
 	}
 
-	commitment.Print()
+	//commitment.Print()
 	fmt.Printf("anwer root=%x (%s)\n", sha256.Sum256(rootNode), roots)
 
 	midIndex := startIndex + (endIndex-startIndex)/2
@@ -1058,28 +1023,9 @@ func postAnswer(startIndex, endIndex int, tr [][][]byte, out wire.OutPoint,
 	fmt.Println("answer sub2=", sub2s)
 
 	startState := tr[startIndex]
-	//midState := tr[midIndex]
 	endState := tr[endIndex]
 
-	//sub1 := &bytes.Buffer{}
-	//if err := catState(sub1, startState); err != nil {
-	//	return nil, nil, err
-	//}
-	//if err := catState(sub1, midState); err != nil {
-	//	return nil, nil, err
-	//}
-	//sub1.Write(sub1Commit)
-
 	hSub1 := sha256.Sum256(sub1)
-
-	//sub2 := &bytes.Buffer{}
-	//if err := catState(sub2, midState); err != nil {
-	//	return nil, nil, err
-	//}
-	//if err := catState(sub2, endState); err != nil {
-	//	return nil, nil, err
-	//}
-	//sub2.Write(sub2Commit)
 
 	hSub2 := sha256.Sum256(sub2)
 
@@ -1241,11 +1187,6 @@ func signKeyInput(tx *wire.MsgTx, idx int, key *btcec.PrivateKey,
 	prevOut *wire.TxOut) (wire.TxWitness, error) {
 
 	sigHashes := txscript.NewTxSigHashes(tx, prevOutFetcher)
-
-	//	fmt.Println("signing tx", spew.Sdump(tx))
-	//	fmt.Println("prevOut", spew.Sdump(prevOut))
-	//	fmt.Println("tapLeaf", spew.Sdump(tapLeaf))
-	//	fmt.Printf("with key %x\n", schnorr.SerializePubKey(key.PubKey()))
 
 	return txscript.TaprootWitnessSignature(
 		tx, sigHashes, idx, prevOut.Value, prevOut.PkScript,
