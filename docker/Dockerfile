@@ -32,5 +32,4 @@ RUN ls -la /app
 RUN ls
 
 # Run
-RUN cat correct_trace.txt
-CMD ["./run_correct.sh"]
+CMD ["./run_trace.sh"]

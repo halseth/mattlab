@@ -110,7 +110,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("read", len(aliceTrace))
+
+	if len(aliceTrace) == 0 {
+		return fmt.Errorf("no trace given")
+	}
+
+	fmt.Println("read trace of length", len(aliceTrace))
 
 	bitcoindHost := os.Getenv("BITCOIND_HOST")
 	bitcoindPort := os.Getenv("BITCOIND_RPC_PORT")

@@ -11,6 +11,7 @@ services:
       BITCOIND_RPC_PW: "mempool"
       BITCOIND_RPC_PORT: "18443"
       BITCOIND_P2P_PORT: "18444"
+      TRACE_FILE: "${TRACE_FILE}"
     image: matt-scenario
       #user: "1000:1000"
       #restart: on-failure
