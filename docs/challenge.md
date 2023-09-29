@@ -18,8 +18,7 @@ In this example we will play out one of the scenarios from Salvatore's
 original mailinglist thread, namely the multiply game[1].
 
 This is a nice example since it easy to validate in Bitcoin script, and it also
-shows how we can support computation involving loops (Turing completemess
-wtf!?).
+shows how we can support computation involving loops (Turing completemess!?).
 
 Please check out the original post for the full example, but the TLDR is that
 we have Bob (the challenger) pick a number `x` and Alice (the proposer) post an
@@ -84,7 +83,8 @@ There are only two real steps to perform in this example.
 The first step (when `pc = 0`), checks whether `i` (the second element on the
 stack) is less than 8. If it is it sets `pc = 1`, otherwise it sets `pc = 2`.
 
-The second step (when `pc = 1`) increments `i` by one, doubles `x`, then finally sets `pc = 0`.
+The second step (when `pc = 1`) increments `i` by one, doubles `x`, then
+finally sets `pc = 0`.
 
 That's all that's to it! Both these steps can be eecuted on the Bitcoin Script
 VM, and although we cannot get the VM to perform this loop on-chain, we can use
@@ -95,7 +95,8 @@ Now that we have our program specified, we'll use that to create a trace of our
 computation. We'll use the same value as in the origial example, `x = 2`, and
 perform the computation `y = f(2)`.
 
-You can generate the trace for this computation by running the example program in `tracer/cmd/tracer`:
+You can generate the trace for this computation by running the example program
+in `tracer/cmd/tracer`:
 
 ```bash
 $ go run tracer/cmd/tracer/main.go
@@ -124,7 +125,8 @@ $ go run tracer/cmd/tracer/main.go
 err: <nil>
 ```
 
-Note that steps 17-31 are all no-ops, this is because the trace is padded to a length power of two.
+Note that steps 17-32 are all no-ops, this is because the trace is padded to a
+length power of two.
 
 ### Committing to the execution
 In order to not have to publish the entire trace (remember, for non-toy
@@ -137,7 +139,9 @@ transition, taking the trace from step `n` to `n+1`. The root of a subtree
 will commit to taking the trace from step `n` to `n+m`, where `m` is the number
 of leaves in the subtree.
 
-In this example we'll simply have the committed state be the concatination of `pc`, `i`, `x` and subpaths. The leaves have no subpaths and will simply commit to the hash of an empty element.
+In this example we'll simply have the committed state be the concatination of
+`pc`, `i`, `x` and subpaths. The leaves have no subpaths and will simply commit
+to the hash of an empty element.
 
 ```
 node = h( start_pc|start_i|start_x|end_pc|end_i|end_x|h( h(sub_node1)|h(sub_node2) )
@@ -166,7 +170,8 @@ the root will commit to the whole transition from `[pc=0,i=0,x=2]` to
 probably have the state be its own merkle tree the script would index into.
 This means you could have the computation work on large amounts of memory! In
 this example we only have three variables so we just concatenate and hash them
-for brevity. Concatenation as in this example is also not safe, as there is no marker between each element, so don't do this with real money.)
+for brevity. Concatenation as in this example is also not safe, as there is no
+marker between each element, so don't do this with real money.)
 
 The root node of this merkle tree will commit to the full execution, and is
 what Alice posts on-chain. In the normal case we expect that's it; if Alice
@@ -177,7 +182,7 @@ we'll execute the challenge protocol.
 To keep this interesting, we must therefore introduce a mistake in Alice's trace:
 
 ```bash
-$ cat alice_trace.txt
+$ cat invalid_trace.txt
 #:	x	i	pc
 0:	2	0	0
 1:	2	0	1
@@ -208,30 +213,18 @@ up with 127. This leads to the trace commitment to change in a detacable way
 
 ```bash
 $  cat invalid_trace.txt | go run commitment/cmd/main.go
-([][]string) (len=6 cap=8) {
- ([]string) (len=1 cap=1) {
-  (string) (len=80) "||02|02|08|fc01|9d207d46d0dfa20b32bc980df4cc4a55aed8d9e3e055b90327f840cd13a62d9b"
- },
  ...
-}
-
-root: dfdda533cad87bdd09bca15f5d9b94097c3f9403240fb08d06d1d241007935f5
+root=dfdda533cad87bdd09bca15f5d9b94097c3f9403240fb08d06d1d241007935f5 (||02|02|08|fc01|9d207d46d0dfa20b32bc980df4cc4a55aed8d9e3e055b90327f840cd13a62d9b)
 ```
 
 Contrast this to the trace commitment created from the correct trace:
 ```bash
 $ cat correct_trace.txt | go run commitment/cmd/main.go
-([][]string) (len=6 cap=8) {
- ([]string) (len=1 cap=1) {
-  (string) (len=80) "||02|02|08|0002|fc58a428e80e8c13377b1b6b677d338cc1289f5799d21025449a91bdf5c2a030"
- },
  ...
-}
-
-root: 02be231fb757d796d439a121f92f3294c271ad2cb12969b553a32e5e50ddf873
+root=02be231fb757d796d439a121f92f3294c271ad2cb12969b553a32e5e50ddf873 (||02|02|08|0002|fc58a428e80e8c13377b1b6b677d338cc1289f5799d21025449a91bdf5c2a030)
 ```
 
-Alice's end state is `02|08|fc01|` (`0xfc01 = 508` little endian) while Bob has
+Alice's end state is `02|08|fc01` (`0xfc01 = 508` little endian) while Bob has
 the correct end state `02|08|0002` (`0002 = 512`). When Alice posts this
 on-chain it is easy for Bob to determine something is not right, and challenge
 the computation.
@@ -327,22 +320,46 @@ the timeout has passed.
 By running the program in `cmd/scenario` you can play out this game using a
 trace for Alice. (Bob will challenge Alice whether he will win or not).
 
-For instance, by using the correct trace, we can see that Alice will win out in
-the end, and spend the money to her wallet:
+You can run the whole setup (including a backing bitcoind instance and
+Mempool.space block exlorer) by building the docker image from the root
+directory:
 
 ```bash
-$ cat correct_trace.txt | go run cmd/scenario/main.go
-<TODO: add better output after cleanup>
+$ docker build -f ./docker/Dockerfile -t matt-scenario .
 ```
 
-Running the same pogram with the modified trace we created above gives a different result:
+Now from the `docker` directory we can run the scenario with a given trace. For
+instance, by using the correct trace, we can see that Alice will win out in the
+end, and spend the money to her wallet:
 
 ```bash
-$ cat invalid_trace.txt | go run cmd/scenario/main.go
-<TODO: add better output after cleanup>
+$ TRACE_FILE="correct_trace.txt" docker-compose up
+<...>
+Alice got the money at bcrt1ps8z43ft4kgnf3ewhev39cryw0c6fpllfw3qdq9cerd285k0u62lqsjsl6x
 ```
 
+While the containers are running, a Mempool instance is available at
+`localhost:80`, where you can explore the transactions that were played out.
+
+For instance, here is the last transaction Alice posted, where she was able to
+win the game by posting a valid state transaction that matched her trace:
+![leaf](mempool_leaf.png)
+
+Check out the scripts with comments in `scripts/scripts.go` for details on the
+scripts themselves.
+
+Running the same pogram with the modified (invalid) trace we created above
+gives a different result :
+
+```bash
+$ docker-compose down -v
+$ TRACE_FILE="invalid_trace.txt" docker-compose up
+<...>
+Bob got the money at bcrt1pkxpk5tktc8m5ud4v5nj5e5mdxeas0xs7tz6k8mqp4ccz659fhcxq3n67nz
+```
+
+Here Bob is able to take the money after a timeout.
 
 
-[0] https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2022-November/021182.html
-[1] https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2022-November/021205.html
+- [0] https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2022-November/021182.html
+- [1] https://lists.linuxfoundation.org/pipermail/bitcoin-dev/2022-November/021205.html
