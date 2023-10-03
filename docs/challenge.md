@@ -152,7 +152,7 @@ The below diagram will show what this would look like for 4 state transitions:
 
 ```mermaid
 graph TB;
-    A(("0|0|2 -> 0|2|8 \n+ h(left|right)"))-->B(("0|0|2 -> 1|0|2 \n+ h(left|right)"))
+    A(("0|0|2 -> 0|2|8 \n+ h(left|right)"))-->B(("0|0|2 -> 1|0|4 \n+ h(left|right)"))
     A-->C(("0|1|4 -> 0|2|8 \n+ h(left|right)"));
     B-->E(("0|0|2 -> 1|0|2"))
     B-->F(("1|0|2 -> 0|1|4"))
