@@ -740,7 +740,7 @@ func postChoose(revealTx *wire.MsgTx, level, startIndex, endIndex int, tr [][][]
 	//commit := outputCommit.Sum(nil)
 	fmt.Printf("choose tx output commit %x\n", commit)
 
-	tweaked := txscript.ComputeTaprootOutputKey(
+	tweaked := txscript.SingleTweakPubKey(
 		numsKey, commit[:],
 	)
 
@@ -848,7 +848,7 @@ func postReveal(level, startIndex, endIndex int, tr [][][]byte, out wire.OutPoin
 	commit := outputCommit.Sum(nil)
 	fmt.Printf("reveal tx output commit %x [%x|%x]\n", commit, hSub1, hSub2)
 
-	tweaked := txscript.ComputeTaprootOutputKey(
+	tweaked := txscript.SingleTweakPubKey(
 		numsKey, commit[:],
 	)
 
@@ -937,7 +937,7 @@ func postChallenge(answerTx *wire.MsgTx, out wire.OutPoint, spender *OutputSpend
 		return nil, nil, err
 	}
 
-	tweaked := txscript.ComputeTaprootOutputKey(
+	tweaked := txscript.SingleTweakPubKey(
 		numsKey, commit[:],
 	)
 
@@ -1062,7 +1062,7 @@ func postAnswer(startIndex, endIndex int, tr [][][]byte, out wire.OutPoint,
 	commit := outputCommit.Sum(nil)
 	fmt.Printf("answer tx output commit %x\n", commit)
 
-	tweaked := txscript.ComputeTaprootOutputKey(
+	tweaked := txscript.SingleTweakPubKey(
 		numsKey, commit[:],
 	)
 
@@ -1133,7 +1133,7 @@ func postQuestion(x []byte, out wire.OutPoint, spender *OutputSpender) (
 	outputCommit := sha256.New()
 	outputCommit.Write(x)
 	hOutputCommit := outputCommit.Sum(nil)
-	tweaked := txscript.ComputeTaprootOutputKey(
+	tweaked := txscript.SingleTweakPubKey(
 		numsKey, hOutputCommit[:],
 	)
 
