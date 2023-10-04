@@ -263,8 +263,8 @@ github.com/grpc-ecosystem/grpc-gateway v1.16.0 h1:gmcG1KaJ57LophUzW0Hy8NmPhnMZb4
 github.com/grpc-ecosystem/grpc-gateway v1.16.0/go.mod h1:BDjrQk3hbvj6Nolgz8mAMFbcEtjT1g+wF4CSlocrBnw=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.5.0 h1:ajue7SzQMywqRjg2fK7dcpc0QhFGpTR2plWfV4EZWR4=
 github.com/grpc-ecosystem/grpc-gateway/v2 v2.5.0/go.mod h1:r1hZAcvfFXuYmcKyCJI9wlyOPIZUJl6FCB8Cpca/NLE=
-github.com/halseth/btcd v0.0.0-20230828121149-438ed1402d55 h1:mzdZ5NhPou0+6uTBXCHpeU3X6Xgqn1XYj6wjzI6qzNw=
-github.com/halseth/btcd v0.0.0-20230828121149-438ed1402d55/go.mod h1:0QJIIN1wwIXF/3G/m87gIwGniDMDQqjVn4SZgnFpsYY=
+github.com/halseth/btcd v0.0.0-20231004080001-6d5cc5abf213 h1:RJz2kbdq7z3YOHc5DykwLv35RmldTbZTY1SiaaMqv1M=
+github.com/halseth/btcd v0.0.0-20231004080001-6d5cc5abf213/go.mod h1:0QJIIN1wwIXF/3G/m87gIwGniDMDQqjVn4SZgnFpsYY=
 github.com/halseth/tapsim v0.0.0-20230828121555-040f142512b7 h1:FrSxjvyhlBp4Y8VOsbFAGHSw3HI6TPZTDt/3hYVVdWs=
 github.com/halseth/tapsim v0.0.0-20230828121555-040f142512b7/go.mod h1:EVoV1aGULeKCJif2vEBIEW5CGUD24REb89HXeJESU74=
 github.com/hashicorp/golang-lru v0.5.0/go.mod h1:/m3WP610KZHVQ1SGc6re/UDhFvYD7pJ4Ao+sR/qLZy8=

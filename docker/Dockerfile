@@ -7,6 +7,8 @@ WORKDIR /btcd-build
 RUN git clone https://github.com/halseth/btcd.git
 WORKDIR /btcd-build/btcd
 RUN git checkout matt
+RUN git pull
+RUN git checkout 6d5cc5abf213665ad2e7d4a57817fcc62f2abc27
 RUN go install -v
 
 # Set destination for COPY
