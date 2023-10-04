@@ -164,6 +164,6 @@ require (
 	sigs.k8s.io/yaml v1.2.0 // indirect
 )
 
-replace github.com/btcsuite/btcd => github.com/halseth/btcd v0.0.0-20231004080001-6d5cc5abf213
+replace github.com/btcsuite/btcd => github.com/halseth/btcd v0.0.0-20231004080001-8f9cf7eee018
 
 replace google.golang.org/protobuf => github.com/lightninglabs/protobuf-go-hex-display v1.30.0-hex-display

@@ -26,10 +26,9 @@ OP_CAT # pc|i
 OP_CAT # pc|i|x
 OP_SHA256 # h(pc|i|x)
 
-%x # output taproot
-OP_0 # nums key
-OP_ROT # get data on top again
 OP_0 # index
+OP_0 # nums key
+%x # output taproot
 OP_0 # check output
 OP_CHECKCONTRACTVERIFY # check output commitment matches subtrees
 
@@ -105,12 +104,10 @@ OP_CAT # start_pc|start_i
 OP_CAT # start_pc|start_i|start_x
 OP_SHA256 # h(pc|i|x)
 
-
 # verify start state on input
-81 # current taptree
-OP_0 # nums key
-OP_ROT # get data on top again
 OP_0 # index
+OP_0 # nums key
+81 # current taptree
 OP_1 # flags, check input
 OP_CHECKCONTRACTVERIFY # check input commitment matches
 
@@ -134,10 +131,9 @@ OP_CAT # start_pc|start_i|start_x|end_pc|end_i|end_x
 OP_CAT # start_pc|start_i|start_x|end_pc|end_i|end_x|trace
 OP_SHA256
 
-%x # output taproot
-OP_0 # nums key
-OP_ROT # get data on top again
 OP_0 # index
+OP_0 # nums key
+%x # output taproot
 OP_0 # check output
 OP_CHECKCONTRACTVERIFY # check output commitment matches subtrees
 
@@ -208,18 +204,15 @@ var challengeScript = `
 # on stack is the commitment
 OP_DUP
 
-81 # current taptree
-OP_0 # nums key
-OP_ROT # get data on top again
 OP_0 # index
+OP_0 # nums key
+81 # current taptree
 OP_1 # flags, check input
 OP_CHECKCONTRACTVERIFY # check input commitment matches
 
-%x # output taproot
-OP_0 # nums key
-OP_ROT # get data on top again
-
 OP_0 # index
+OP_0 # nums key
+%x # output taproot
 OP_0 # check output
 OP_CHECKCONTRACTVERIFY # check output commitment matches subtrees
 
@@ -394,11 +387,9 @@ OP_SWAP
 OP_CAT # start_pc|start_i|start_x|end_pc|end_i|end_x|h(h(sub1)|h(sub2))
 OP_SHA256 # h(node)
 
-81 # current taptree
-OP_0 # nums key
-OP_ROT # get data on top again
-
 OP_0 # index
+OP_0 # nums key
+81 # current taptree
 OP_1 # flags, check input
 OP_CHECKCONTRACTVERIFY # check input commitment matches
 
@@ -406,13 +397,9 @@ OP_CHECKCONTRACTVERIFY # check input commitment matches
 # build output commitment
 OP_FROMALTSTACK # h(h(sub1)|h(sub2)) from alt stack
 
-# TODO output script: choose+timeout script tree
-# TODO: commitment the two subtrees
-%x # output taproot
-OP_0 # nums key
-OP_ROT # get data on top again
-
 OP_0 # index
+OP_0 # nums key
+%x # output taproot
 OP_0 # check output
 OP_CHECKCONTRACTVERIFY # check output commitment matches subtrees
 
@@ -481,11 +468,9 @@ OP_2DUP # duplicate two subtree commits
 OP_CAT # h(sub1)|h(sub2)
 OP_SHA256 # h(h(sub1)|h(sub2))
 
-81 # current taptree
-OP_0 # nums key
-OP_ROT # get data on top again
-
 OP_0 # index
+OP_0 # nums key
+81 # current taptree
 OP_1 # flags, check input
 OP_CHECKCONTRACTVERIFY # check input commitment matches the two subtrees
 
@@ -496,13 +481,9 @@ OP_ENDIF
 
 OP_DROP
 
-%x # output taptree
-OP_0 # nums key
-OP_ROT # get data on top again
-
-# reveal+leaf+timeout script tree
-# subtree commitment
 OP_0 # index
+OP_0 # nums key
+%x # output taptree
 OP_0 # check output
 OP_CHECKCONTRACTVERIFY
 
@@ -629,12 +610,10 @@ OP_SWAP
 OP_CAT # pc|i|x|pc|i|x|h(h(<>)|h(<>))
 OP_SHA256 # h(pc|i|x|pc|i|x|h(h(<>)|h(<>)))
 
-81 # current taptree
-OP_0 # nums key
-OP_ROT # get data on top again
-
 # Now we check that the start and end state match what was committed.
 OP_0 # index
+OP_0 # nums key
+81 # current taptree
 OP_1 # flags, check input
 OP_CHECKCONTRACTVERIFY
 
