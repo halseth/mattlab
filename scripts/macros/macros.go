@@ -75,6 +75,7 @@ func AmendMerkle(numLevels int) string {
 	// on stack: <old root>
 	s += fromAltstack
 	s += swap
+	s += fromAltstack
 	s += verifyRoot
 
 	// new root on stack
